@@ -1,0 +1,29 @@
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #0a0e1a; color: #e5e7eb; }
+.card { background: #111827; border: 1px solid #1f2937; }
+.pill { transition: all .15s ease; cursor: pointer; }
+.pill-active { background: #1e40af; color: #fff; }
+.num-pos { color: #10b981; }
+.num-neg { color: #ef4444; }
+.num-neutral { color: #9ca3af; }
+table { border-collapse: separate; border-spacing: 0; }
+th { position: sticky; top: 0; background: #0f172a; z-index: 10; }
+.row-hover:hover { background: #1e293b; }
+.scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+.scrollbar::-webkit-scrollbar-track { background: transparent; }
+.badge-ipca { background: rgba(168,85,247,.15); color: #c084fc; }
+.badge-cdi { background: rgba(59,130,246,.15); color: #60a5fa; }
+.badge-lf { background: rgba(245,158,11,.15); color: #fbbf24; }
+.badge-misto { background: rgba(156,163,175,.15); color: #9ca3af; }
+.badge-warn { background: rgba(239,68,68,.15); color: #f87171; }
+.badge-ok { background: rgba(16,185,129,.15); color: #34d399; }
+select.mini { background:#0f172a; border:1px solid #1f2937; padding:2px 6px; border-radius:4px; font-size:10px; color:#94a3b8; }
+select.mini:focus { outline:none; border-color:#3b82f6; }
+.tooltip { position:relative; }
+.tooltip:hover .tooltip-body { display:block; }
+.tooltip-body { display:none; position:absolute; bottom:100%; left:0; margin-bottom:6px; background:#1e293b; border:1px solid #334155; padding:8px 10px; border-radius:6px; font-size:11px; width:260px; z-index:100; color:#cbd5e1; }
+#dossie-overlay { transition: opacity .2s ease; }
+#dossie { transition: transform .28s cubic-bezier(.16,1,.3,1); }
+.dossie-closed { transform: translateX(100%); }
+.dossie-open { transform: translateX(0); }
+.loading { opacity: .4; pointer-events: none; }
