@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+import warnings
 from datetime import date, datetime
 from pathlib import Path
 
@@ -196,7 +197,9 @@ class VinculadoConnector(DataConnector):
 
         logger.info("Lendo %s", self.caminho.name)
         self.recebido_em = datetime.fromtimestamp(self.caminho.stat().st_mtime)
-        raw = pd.read_excel(self.caminho, sheet_name=0, header=None)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
+            raw = pd.read_excel(self.caminho, sheet_name=0, header=None)
 
         cols = self._mapear_colunas(raw)
         self.tem_cnpj = "cnpj" in cols

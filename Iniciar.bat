@@ -35,7 +35,7 @@ pip install -r requirements.txt -q
 if not exist ".env" copy .env.example .env
 
 echo [INFO] Iniciando API (Backend)...
-start "API - Captacao" cmd /k "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && uvicorn app.main:app --reload --port 8081"
+start "API - Captacao" cmd /k "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && uvicorn app.main:app --reload --port 8000"
 
 :: Aguarda a API subir
 timeout /t 3 >nul

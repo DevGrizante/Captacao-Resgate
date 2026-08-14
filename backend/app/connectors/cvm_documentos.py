@@ -133,6 +133,11 @@ def extrato() -> pd.DataFrame:
                     "PARAM_TAXA_PERFM",
                 },
             ))
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.info("EXTRATO %s indisponível (404).", ano)
+            else:
+                logger.warning("EXTRATO %s indisponível: %s", ano, e)
         except Exception as e:  # noqa: BLE001
             logger.warning("EXTRATO %s indisponível: %s", ano, e)
 
@@ -206,6 +211,11 @@ def lamina() -> pd.DataFrame:
                         z.open(nome), sep=";", encoding="latin-1", low_memory=False,
                         usecols=lambda c: c in {"CNPJ_FUNDO_CLASSE", "DT_COMPTC", "INDICE_REFER"},
                     ))
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.info("LAMINA %s indisponível (404).", aaaamm)
+            else:
+                logger.warning("LAMINA %s indisponível: %s", aaaamm, e)
         except Exception as e:  # noqa: BLE001
             logger.warning("LAMINA %s indisponível: %s", aaaamm, e)
 
@@ -257,6 +267,11 @@ def perfil_mensal() -> pd.DataFrame:
                     | set(COTISTAS)
                 ),
             ))
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.info("PERFIL %s indisponível (404).", aaaamm)
+            else:
+                logger.warning("PERFIL %s indisponível: %s", aaaamm, e)
         except Exception as e:  # noqa: BLE001
             logger.warning("PERFIL %s indisponível: %s", aaaamm, e)
 

@@ -59,7 +59,7 @@ async function init() {
   } catch (e) {
     document.body.insertAdjacentHTML("afterbegin",
       `<div class="bg-red-950 text-red-300 text-sm p-3 text-center">
-        Não consegui falar com a API em ${API_BASE}. Suba o backend (uvicorn app.main:app --port 8081) e recarregue.<br>
+        Não consegui falar com a API em ${API_BASE}. Suba o backend (uvicorn app.main:app --port 8000) e recarregue.<br>
         <span style="color: yellow; font-family: monospace;">ERRO JS: ${e.message}</span>
       </div>`);
     console.error(e);
