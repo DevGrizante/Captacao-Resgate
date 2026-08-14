@@ -26,6 +26,10 @@
   </div>
 </header>
 
+<!-- Aviso de fonte: preenchido por renderFonte() quando a fonte não entrega
+     todos os campos (hoje: planilha do e-mail, sem PL nem indexador). -->
+<div id="fonte-aviso" class="hidden"></div>
+
 <main class="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
 
   <!-- Filtros -->
@@ -39,12 +43,7 @@
           <button data-w="mensal" class="pill px-3 py-1 text-xs rounded bg-slate-800">Mensal</button>
           <button data-w="semestral" class="pill px-3 py-1 text-xs rounded bg-slate-800">Semestral</button>
         </div>
-        <select class="mini mt-1.5" id="cmp-janela">
-          <option value="prev">vs. período anterior</option>
-          <option value="yoy">vs. mesmo período ano passado</option>
-          <option value="avg13">vs. média das últimas 13 semanas</option>
-          <option value="none">sem comparação</option>
-        </select>
+
       </div>
       <div class="w-px h-16 bg-slate-800"></div>
       <div>
@@ -56,11 +55,7 @@
           <button data-i="lf" class="pill px-3 py-1 text-xs rounded bg-slate-800">LF</button>
           <button data-i="misto" class="pill px-3 py-1 text-xs rounded bg-slate-800">Misto</button>
         </div>
-        <select class="mini mt-1.5" id="cmp-idx">
-          <option value="none">isolado</option>
-          <option value="all">vs. total do mercado</option>
-          <option value="cross">comparar entre buckets</option>
-        </select>
+
       </div>
       <div class="w-px h-16 bg-slate-800"></div>
       <div class="flex-1 min-w-[200px]">
@@ -77,40 +72,33 @@
         </div>
       </div>
     </div>
-    <div class="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex items-center gap-3 flex-wrap">
-      <span class="text-slate-400">Regra de bucket:</span>
-      <span><span class="text-slate-600">1º</span> &gt;50% em <span class="text-amber-400">LF</span></span>
-      <span class="text-slate-700">→</span>
-      <span><span class="text-slate-600">2º</span> &gt;50% em <span class="text-purple-400">IPCA+</span> (ex-LF)</span>
-      <span class="text-slate-700">→</span>
-      <span><span class="text-slate-600">3º</span> &gt;50% em <span class="text-blue-400">CDI+</span> (ex-LF)</span>
-      <span class="text-slate-700">→</span>
-      <span><span class="text-slate-600">4º</span> <span class="text-slate-400">Misto</span></span>
-      <span class="ml-auto text-slate-600">Fonte: CDA/CVM + Quantum Axis</span>
-    </div>
+
   </section>
 
-  <!-- KPIs fluxo -->
-  <section>
-    <h3 class="text-[11px] uppercase tracking-wider text-slate-500 mb-2 pl-1">Fluxo</h3>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div class="card rounded-lg p-4" id="kpi-capt"></div>
-      <div class="card rounded-lg p-4" id="kpi-resg"></div>
-      <div class="card rounded-lg p-4" id="kpi-pl"></div>
+  <!-- KPIs fluxo e mesa -->
+  <section class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+    <!-- Fluxo -->
+    <div class="lg:col-span-3">
+      <h3 class="text-[11px] uppercase tracking-wider text-slate-500 mb-2 pl-1">Fluxo</h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card rounded-lg p-4" id="kpi-capt"></div>
+        <div class="card rounded-lg p-4" id="kpi-resg"></div>
+        <div class="card rounded-lg p-4" id="kpi-pl"></div>
+      </div>
     </div>
-  </section>
 
-  <!-- KPIs mesa -->
-  <section>
-    <div class="flex items-center gap-2 mb-2 pl-1">
-      <h3 class="text-[11px] uppercase tracking-wider text-slate-500">Métricas para mesa PJ</h3>
-      <span class="tooltip cursor-help text-slate-600 text-xs">ⓘ
-        <span class="tooltip-body">Médias ponderadas por PL, refletindo apenas o universo filtrado acima.</span>
-      </span>
-    </div>
-    <div class="grid grid-cols-2 gap-4">
-      <div class="card rounded-lg p-4 border-emerald-900/40 bg-emerald-950/10" id="kpi-abertos"></div>
-      <div class="card rounded-lg p-4" id="kpi-fluxo"></div>
+    <!-- Mesa PJ -->
+    <div class="lg:col-span-2">
+      <div class="flex items-center gap-2 mb-2 pl-1">
+        <h3 class="text-[11px] uppercase tracking-wider text-slate-500">Métricas para mesa PJ</h3>
+        <span class="tooltip cursor-help text-slate-600 text-xs">ⓘ
+          <span class="tooltip-body">Médias ponderadas por PL, refletindo apenas o universo filtrado acima.</span>
+        </span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="card rounded-lg p-4 border-emerald-900/40 bg-emerald-950/10" id="kpi-abertos"></div>
+        <div class="card rounded-lg p-4" id="kpi-fluxo"></div>
+      </div>
     </div>
   </section>
 
@@ -122,22 +110,47 @@
         <span class="text-xs text-slate-500" id="idx-window-label">semanal</span>
       </div>
       <div class="space-y-3" id="buckets"></div>
+      <p class="text-[11px] text-slate-500 mt-3 hidden" id="buckets-vazio"></p>
     </div>
     <div class="card rounded-lg p-4 lg:col-span-2">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold">Fluxo semanal por indexador · últimas 26 semanas</h2>
-        <div class="flex gap-3 text-xs items-center">
-          <label class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-purple-500"></span>IPCA+</label>
-          <label class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span>CDI+</label>
-          <label class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span>LF</label>
-          <select class="mini" id="tl-view">
-            <option value="flow">Fluxo</option>
-            <option value="cum">Fluxo acumulado</option>
-            <option value="pct">% do PL</option>
-          </select>
-        </div>
+        <h2 class="text-sm font-semibold" id="tl-title">Fluxo líquido semanal</h2>
+        <div class="flex gap-3 text-xs items-center" id="tl-legend"></div>
       </div>
       <div class="h-64"><canvas id="chart-timeline"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Tabela consolidada -->
+  <section class="card rounded-lg overflow-hidden">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h2 class="text-sm font-semibold">Consolidado por gestora</h2>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <span class="text-slate-500">Visão:</span>
+        <select id="view-mode" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+          <option value="fluxo">Fluxo</option>
+          <option value="mesa">Mesa · taxa, cotização, mínimo</option>
+          <option value="perf">Performance · retorno e risco</option>
+          <option value="dist">Distribuição · quem compra</option>
+        </select>
+        <span class="text-slate-500">Ordenar:</span>
+        <select id="sort-by" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+          <option value="semestral">|Semestral|</option>
+          <option value="mensal">|Mensal|</option>
+          <option value="semanal">|Semanal|</option>
+          <option value="pl">PL</option>
+          <option value="rentab_media_pct">Rentabilidade</option>
+          <option value="fundos">Nº fundos</option>
+        </select>
+      </div>
+    </div>
+    <div class="max-h-[560px] overflow-y-auto scrollbar">
+      <table class="w-full text-xs">
+        <thead><tr class="text-left text-slate-400" id="table-head"></tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
     </div>
   </section>
 
@@ -146,8 +159,8 @@
     <div class="card rounded-lg overflow-hidden">
       <div class="p-4 pb-3 flex items-center justify-between">
         <div>
-          <h2 class="text-sm font-semibold">Top movers · variação % de PL</h2>
-          <p class="text-[10px] text-slate-500">Gestoras com maior variação relativa na janela</p>
+          <h2 class="text-sm font-semibold" id="movers-title">Top movers</h2>
+          <p class="text-[10px] text-slate-500" id="movers-sub">Gestoras com maior variação relativa na janela</p>
         </div>
         <select class="mini" id="movers-dir">
           <option value="pos">Ganhando</option>
@@ -159,7 +172,7 @@
           <th class="px-4 py-1.5 font-medium">Gestora</th>
           <th class="px-4 py-1.5 font-medium text-center">Dur.</th>
           <th class="px-4 py-1.5 font-medium text-center">Cot.</th>
-          <th class="px-4 py-1.5 font-medium text-right">Var. PL</th>
+          <th class="px-4 py-1.5 font-medium text-right" id="movers-col">Var. PL</th>
         </tr></thead>
         <tbody id="movers-list"></tbody>
       </table>
@@ -168,16 +181,16 @@
       <div class="p-4 pb-3 flex items-center justify-between">
         <div>
           <h2 class="text-sm font-semibold">Sinais de estresse</h2>
-          <p class="text-[10px] text-slate-500">Fundos com resgate ≥ 5% do PL na semana</p>
+          <p class="text-[10px] text-slate-500" id="stress-sub">—</p>
         </div>
       </div>
       <div class="max-h-56 overflow-y-auto scrollbar">
         <table class="w-full text-xs">
           <thead><tr class="text-left text-slate-500">
             <th class="px-4 py-1.5 font-medium">Fundo</th>
-            <th class="px-4 py-1.5 font-medium text-center">Dur.</th>
-            <th class="px-4 py-1.5 font-medium text-center">Cot.</th>
-            <th class="px-4 py-1.5 font-medium text-right">Resg. %PL</th>
+            <th class="px-4 py-1.5 font-medium text-center" id="stress-c1">Dur.</th>
+            <th class="px-4 py-1.5 font-medium text-center" id="stress-c2">Cot.</th>
+            <th class="px-4 py-1.5 font-medium text-right" id="stress-c3">Resg. %PL</th>
           </tr></thead>
           <tbody id="stress-list"></tbody>
         </table>
@@ -203,44 +216,40 @@
     </div>
   </section>
 
-  <!-- Tabela consolidada -->
-  <section class="card rounded-lg overflow-hidden">
-    <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
-      <div>
-        <h2 class="text-sm font-semibold">Consolidado por gestora</h2>
-        <p class="text-xs text-slate-500 mt-0.5">Clique numa linha para abrir o dossiê lateral</p>
-      </div>
-      <div class="flex items-center gap-3 text-xs">
-        <span class="text-slate-500">Ordenar por:</span>
-        <select id="sort-by" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
-          <option value="semestral">|Semestral|</option>
-          <option value="mensal">|Mensal|</option>
-          <option value="semanal">|Semanal|</option>
-          <option value="fundos">Nº fundos</option>
-        </select>
-      </div>
-    </div>
-    <div class="max-h-[560px] overflow-y-auto scrollbar">
-      <table class="w-full text-xs">
-        <thead><tr class="text-left text-slate-400">
-          <th class="px-4 py-2 font-medium">Gestora</th>
-          <th class="px-4 py-2 font-medium text-center">Fundos</th>
-          <th class="px-4 py-2 font-medium text-center">Abertos</th>
-          <th class="px-4 py-2 font-medium text-center">Mix IPCA/CDI/LF/Misto</th>
-          <th class="px-4 py-2 font-medium text-right">Diária</th>
-          <th class="px-4 py-2 font-medium text-right">Semanal</th>
-          <th class="px-4 py-2 font-medium text-right">Mensal</th>
-          <th class="px-4 py-2 font-medium text-right">Semestral</th>
-        </tr></thead>
-        <tbody id="table-body"></tbody>
-      </table>
-    </div>
-  </section>
 
-  <footer class="text-xs text-slate-600 text-center py-4 border-t border-slate-800/50">
-    Captação e Resgate · Crédito Privado · FastAPI + CVM/Quantum · dados via API
+
+  <footer class="text-xs text-slate-600 text-center py-4 border-t border-slate-800/50" id="rodape">
+    Captação e Resgate · Crédito Privado
   </footer>
 </main>
+
+<!-- Dossiê lateral de Indexador -->
+<div id="idx-dossie-overlay" class="fixed inset-0 bg-black/50 z-40 hidden opacity-0" onclick="closeIdxDossie()"></div>
+<aside id="idx-dossie" class="dossie-closed fixed top-0 right-0 h-full w-full max-w-[400px] bg-slate-950 border-l border-slate-800 z-50 flex flex-col">
+  <div class="p-5 border-b border-slate-800 flex items-start justify-between">
+    <div>
+      <p class="text-[10px] uppercase tracking-wider text-slate-500">Fluxo por indexador</p>
+      <h2 class="text-lg font-semibold mt-0.5 flex items-center gap-2" id="idx-d-name">—</h2>
+    </div>
+    <button onclick="closeIdxDossie()" class="text-slate-500 hover:text-slate-200 text-2xl leading-none">×</button>
+  </div>
+  <div class="flex-1 overflow-y-auto scrollbar p-5 space-y-5">
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold">Top captação</h2>
+        <span class="text-xs text-slate-500" id="idx-d-window-cap">semanal</span>
+      </div>
+      <div id="idx-top-cap" class="space-y-2"></div>
+    </div>
+    <div class="pt-2">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold">Top resgate</h2>
+        <span class="text-xs text-slate-500" id="idx-d-window-res">semanal</span>
+      </div>
+      <div id="idx-top-res" class="space-y-2"></div>
+    </div>
+  </div>
+</aside>
 
 <!-- Dossiê lateral -->
 <div id="dossie-overlay" class="fixed inset-0 bg-black/50 z-40 hidden opacity-0" onclick="closeDossie()"></div>
@@ -261,20 +270,43 @@
       <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500 uppercase">Abertos p/ captação</p><p class="text-lg font-semibold mt-0.5" id="d-abertos">—</p></div>
     </div>
     <div>
-      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Composição por bucket</p>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+        Composição por bucket <span class="text-slate-600 normal-case" id="d-mix-fonte"></span>
+      </p>
       <div class="flex h-3 w-full rounded overflow-hidden" id="d-mix-bar"></div>
       <div class="grid grid-cols-4 gap-2 mt-2 text-center text-[10px]" id="d-mix-legend"></div>
     </div>
+
+    <div id="d-papel-box">
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+        Em que papel entra <span class="text-slate-600 normal-case">· instrumento, não indexador</span>
+      </p>
+      <div class="flex h-3 w-full rounded overflow-hidden" id="d-papel-bar"></div>
+      <p class="text-[10px] text-slate-500 mt-1.5" id="d-papel-legend"></p>
+    </div>
+
+
     <div>
       <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Métricas da carteira</p>
       <div class="grid grid-cols-3 gap-3 text-center">
-        <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">Duration</p><p class="text-sm font-semibold mt-1" id="d-dur">—</p></div>
+        <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">Prazo carteira</p><p class="text-sm font-semibold mt-1" id="d-dur">—</p></div>
         <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">Cotização</p><p class="text-sm font-semibold mt-1" id="d-cot">—</p></div>
         <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">Taxa adm.</p><p class="text-sm font-semibold mt-1" id="d-tx">—</p></div>
+        <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">Rentab. 6m</p><p class="text-sm font-semibold mt-1" id="d-rent">—</p></div>
+        <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">Volatilidade</p><p class="text-sm font-semibold mt-1" id="d-vol">—</p></div>
+        <div class="card rounded-lg p-3"><p class="text-[10px] text-slate-500">% créd. privado</p><p class="text-sm font-semibold mt-1" id="d-cred">—</p></div>
       </div>
     </div>
+
+
+
+    <div id="d-perfil-box">
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Quem já compra · % do PL por tipo de investidor</p>
+      <div class="flex h-3 w-full rounded overflow-hidden" id="d-perfil-bar"></div>
+      <div class="grid grid-cols-3 gap-x-3 gap-y-1 mt-2 text-[10px]" id="d-perfil-legend"></div>
+    </div>
     <div>
-      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Fluxo semanal · 13 semanas</p>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Fluxo líquido semanal · 13 semanas</p>
       <div class="h-28"><canvas id="d-spark"></canvas></div>
     </div>
     <div>
@@ -283,9 +315,10 @@
         <table class="w-full text-xs">
           <thead><tr class="text-left text-slate-500">
             <th class="px-3 py-2 font-medium">Fundo</th>
-            <th class="px-3 py-2 font-medium text-center">Bucket</th>
+            <th class="px-3 py-2 font-medium text-right">PL</th>
+            <th class="px-3 py-2 font-medium text-center">Taxa</th>
             <th class="px-3 py-2 font-medium text-center">D+</th>
-            <th class="px-3 py-2 font-medium text-center">Status</th>
+            <th class="px-3 py-2 font-medium text-right">Aplic. mín.</th>
             <th class="px-3 py-2 font-medium text-right">Semanal</th>
           </tr></thead>
           <tbody id="d-fundos"></tbody>
@@ -295,7 +328,7 @@
   </div>
 </aside>
 
-<script src="js/api.js?v=3"></script>
-<script src="js/app.js?v=3"></script>
+<script src="js/api.js?v=5"></script>
+<script src="js/app.js?v=5"></script>
 </body>
 </html>

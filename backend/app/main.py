@@ -34,8 +34,14 @@ app.include_router(api.router)
 
 @app.get("/health")
 def health():
+    """Vivo? E lendo o quê? Não dispara carga — só reporta o que já está em pé."""
+    from app.services import outlook_inbox
+
+    ultimo = outlook_inbox.arquivo_mais_recente()
     return {
         "status": "ok",
         "data_source": settings.DATA_SOURCE,
         "quantum_enabled": settings.QUANTUM_ENABLED,
+        "outlook_enabled": settings.OUTLOOK_ENABLED,
+        "ultimo_arquivo": ultimo.name if ultimo else None,
     }

@@ -9,18 +9,37 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Raiz do projeto (…/Captacao_Resgate)
 BASE_DIR = Path(__file__).resolve().parents[2]
+
+# Carrega backend/.env antes de qualquer os.getenv abaixo. Variáveis já
+# definidas no ambiente têm precedência sobre o arquivo.
+load_dotenv(BASE_DIR / "backend" / ".env")
 DATA_DIR = BASE_DIR / "data"
 CACHE_DIR = DATA_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Onde os anexos vinculado_*.xlsx baixados do e-mail ficam guardados.
+INBOX_DIR = DATA_DIR / "inbox"
+INBOX_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Settings:
     # --- Fonte de dados ---
-    # "cvm"  -> baixa e processa dados abertos da CVM (real)
-    # "mock" -> usa amostra fixa embutida (roda offline, ótimo p/ validar front)
-    DATA_SOURCE: str = os.getenv("DATA_SOURCE", "mock")
+    # "vinculado" -> planilha vinculado_*.xlsx que chega por e-mail (padrão hoje)
+    # "cvm"       -> baixa e processa dados abertos da CVM (real)
+    # "mock"      -> amostra fixa embutida (roda offline, valores sintéticos)
+    DATA_SOURCE: str = os.getenv("DATA_SOURCE", "vinculado")
+
+    # --- Ingestão do e-mail (fonte "vinculado") ---
+    # Lê o Outlook local via COM. Com false, usa só o que já está em data/inbox.
+    OUTLOOK_ENABLED: bool = os.getenv("OUTLOOK_ENABLED", "true").lower() == "true"
+    OUTLOOK_PASTA: str = os.getenv("OUTLOOK_PASTA", "Quantum")
+    OUTLOOK_REMETENTE: str = os.getenv("OUTLOOK_REMETENTE", "ottavio.lucca@bgcg.com")
+    OUTLOOK_ASSUNTO: str = os.getenv("OUTLOOK_ASSUNTO", "Captação e resgate")
+    # Quantos e-mails recentes varrer antes de desistir.
+    OUTLOOK_MAX_ITENS: int = int(os.getenv("OUTLOOK_MAX_ITENS", "60"))
 
     # --- CVM ---
     CVM_BASE_URL: str = os.getenv(
@@ -29,6 +48,71 @@ class Settings:
     )
     # Quantos meses de informe diário puxar para montar as janelas
     CVM_MESES_INFORME: int = int(os.getenv("CVM_MESES_INFORME", "7"))
+    CVM_TIMEOUT_S: int = int(os.getenv("CVM_TIMEOUT_S", "180"))
+
+    # Enriquecer a planilha do e-mail com PL e cadastro da CVM, casando pelo
+    # CNPJ do fundo. Depende da coluna CNPJ existir no anexo.
+    CVM_ENRIQUECER: bool = os.getenv("CVM_ENRIQUECER", "true").lower() == "true"
+    # O cadastro muda pouco; um dia de cache evita rebaixar 7 MB a cada refresh.
+    CVM_CADASTRO_TTL_HORAS: int = int(os.getenv("CVM_CADASTRO_TTL_HORAS", "24"))
+    # Piso de credibilidade do PL. O registro tem valores de placeholder (205
+    # classes com PL <= 0, algumas com PL = R$ 1) que, divididos pelo fluxo,
+    # produzem percentuais absurdos. Abaixo deste piso tratamos como "sem PL".
+    CVM_PL_MINIMO: float = float(os.getenv("CVM_PL_MINIMO", "100000"))
+    # Informe diário: fonte primária de PL, e também de rentabilidade,
+    # volatilidade e nº de cotistas. 7 meses dá série suficiente para uma
+    # janela de 6 meses de retorno.
+    CVM_INFORME_MESES: int = int(os.getenv("CVM_INFORME_MESES", "7"))
+    CVM_INFORME_TTL_HORAS: int = int(os.getenv("CVM_INFORME_TTL_HORAS", "12"))
+    # Série mais curta que isso não descreve retorno — o campo fica vazio.
+    CVM_RENTAB_DIAS_MIN: int = int(os.getenv("CVM_RENTAB_DIAS_MIN", "150"))
+    # Janela da variação de PL ("Top movers"): PL de hoje contra o de N dias.
+    CVM_PL_VAR_DIAS: int = int(os.getenv("CVM_PL_VAR_DIAS", "30"))
+    # PL mínimo (R$) para uma gestora aparecer no painel de "Top movers".
+    # Sem piso, quem sai do zero marca +700% e domina a lista.
+    MOVERS_PL_MINIMO: float = float(os.getenv("MOVERS_PL_MINIMO", "100000000"))
+
+    # --- EXTRATO e PERFIL MENSAL ---
+    # O EXTRATO é anual: unir vários anos leva a cobertura de 13,7% para 68,9%.
+    CVM_EXTRATO_ANOS: int = int(os.getenv("CVM_EXTRATO_ANOS", "5"))
+    # O PERFIL é mensal mas nem todo fundo declara todo mês: unir 6 meses leva
+    # a cobertura de 7,8% para 82,8%.
+    CVM_PERFIL_MESES: int = int(os.getenv("CVM_PERFIL_MESES", "6"))
+    CVM_DOCUMENTOS_TTL_HORAS: int = int(os.getenv("CVM_DOCUMENTOS_TTL_HORAS", "24"))
+    # Teto de sanidade da taxa de administração (% a.a.). O campo chega a
+    # 40.000 em alguns fundos — é o valor em reais preenchido no lugar do
+    # percentual, e sem o corte ele destrói a média da gestora inteira.
+    CVM_TAXA_ADM_TETO: float = float(os.getenv("CVM_TAXA_ADM_TETO", "10"))
+
+    # --- Composição da carteira / bucket (connectors/cvm_carteira.py) ---
+    # Lê o CDA da CVM com atraso de propósito: no mês corrente 45,9% do PL do
+    # nosso universo está sob sigilo, e o que sobra é amostra enviesada. Com 4
+    # meses o sigilo praticamente zera e a carteira visível dobra.
+    CDA_DEFASAGEM_MESES: int = int(os.getenv("CDA_DEFASAGEM_MESES", "4"))
+    CDA_TTL_HORAS: int = int(os.getenv("CDA_TTL_HORAS", "24"))
+    # Guardas por fundo: abaixo delas o fundo sai sem bucket em vez de entrar
+    # com uma composição lida pela metade.
+    CDA_IDX_MINIMO_PCT: float = float(os.getenv("CDA_IDX_MINIMO_PCT", "80"))
+    CDA_SIGILO_MAXIMO_PCT: float = float(os.getenv("CDA_SIGILO_MAXIMO_PCT", "20"))
+    CDA_CREDITO_MINIMO_PCT: float = float(os.getenv("CDA_CREDITO_MINIMO_PCT", "10"))
+    # Registro de debêntures do SND: dá o indexador de 99,4% do valor do BLC_4.
+    SND_TTL_HORAS: int = int(os.getenv("SND_TTL_HORAS", "168"))
+
+    # --- Perfil de indexador observado (services/perfil_indexador.py) ---
+    # NÃO é o bucket: mede exposição do cotista, não composição da carteira.
+    PERFIL_INDEXADOR_INFERIR: bool = (
+        os.getenv("PERFIL_INDEXADOR_INFERIR", "true").lower() == "true"
+    )
+    # Abaixo da zona baixa = pós-fixado; acima da alta = inflação; no meio,
+    # não afirmamos (lá o acerto cai de 87% para 77%).
+    PERFIL_VOL_ZONA_BAIXA: float = float(os.getenv("PERFIL_VOL_ZONA_BAIXA", "2.5"))
+    PERFIL_VOL_ZONA_ALTA: float = float(os.getenv("PERFIL_VOL_ZONA_ALTA", "5.0"))
+
+    # --- Universo: crédito privado ---
+    # "todos" | "sinal" (qualquer indício) | "estrito" (só o % declarado à CVM)
+    CREDITO_PRIVADO_MODO: str = os.getenv("CREDITO_PRIVADO_MODO", "sinal")
+    # % mínimo do PL em crédito privado no modo estrito / para o sinal do perfil
+    CREDITO_PRIVADO_LIMIAR: float = float(os.getenv("CREDITO_PRIVADO_LIMIAR", "5"))
 
     # --- Quantum Axis (stub por enquanto) ---
     QUANTUM_ENABLED: bool = os.getenv("QUANTUM_ENABLED", "false").lower() == "true"
@@ -40,8 +124,20 @@ class Settings:
     # --- Classificação por indexador ---
     # Limiar para um fundo ser considerado "majoritário" num indexador
     THRESHOLD_MAJORITARIO: float = float(os.getenv("THRESHOLD_MAJORITARIO", "0.5"))
-    # Limiar de resgate semanal (fração do PL) para virar sinal de estresse
+    # Limiar de resgate semanal (fração do PL) para virar sinal de estresse.
+    # Só se aplica quando há PL — hoje, só na fonte "cvm"/"mock".
     THRESHOLD_STRESS: float = float(os.getenv("THRESHOLD_STRESS", "0.05"))
+
+    # --- Estresse sem PL (fonte "vinculado") ---
+    # Sem PL não dá para medir "resgatou X% do fundo". O proxy é comparar o
+    # resgate da semana com o tamanho típico de movimento do próprio fundo nas
+    # últimas semanas: um fundo que sempre movimenta R$ 1 mi e resgata R$ 20 mi
+    # está estressado; um que sempre movimenta R$ 500 mi, não.
+    STRESS_SEMANAS_BASE: int = int(os.getenv("STRESS_SEMANAS_BASE", "13"))
+    # Quantas vezes o movimento típico o resgate precisa ser.
+    STRESS_MULTIPLO: float = float(os.getenv("STRESS_MULTIPLO", "2.0"))
+    # Piso absoluto (R$) — evita encher a lista com fundo minúsculo.
+    STRESS_MINIMO_ABS: float = float(os.getenv("STRESS_MINIMO_ABS", "10000000"))
 
     # --- Cache ---
     CACHE_TTL_HORAS: int = int(os.getenv("CACHE_TTL_HORAS", "12"))

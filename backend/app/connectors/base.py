@@ -20,15 +20,30 @@ class DataConnector(ABC):
         """Retorna a lista de fundos crus.
 
         Cada item deve conter, no mínimo:
-            cnpj, nome, gestora,
-            diaria, semanal, mensal, semestral (floats),
-            pl (float),
+            nome, gestora,
+            diaria, semanal, mensal, semestral (floats)
+        E, quando a fonte tiver:
+            cnpj, pl, pl_anterior,
             pct_lf, pct_ipca, pct_cdi (frações 0..1),
             duration, cotizacao_resgate, taxa_adm, aberto_captacao,
-            resgate_pct_pl_semana
-        Campos ausentes são tolerados pelo pipeline (viram None/0).
+            resgate_pct_pl_semana,
+            historico_semanal ({data_fim_iso: fluxo_liquido_da_semana})
+
+        Campo que a fonte não tem deve vir `None` — nunca zero. O pipeline
+        propaga o None até o front, que mostra "—". Zero significaria "medimos
+        e deu zero", que é uma afirmação diferente.
         """
         raise NotImplementedError
+
+    def metadados(self) -> dict:
+        """Info sobre a extração, exposta no rodapé do dashboard.
+
+        Chaves reconhecidas: arquivo, recebido_em, data_referencia e
+        `janelas` — a lista de janelas semanais no formato
+        {chave, inicio, fim, rotulo, curto}, em ordem cronológica, que o
+        pipeline usa para montar a série temporal.
+        """
+        return {}
 
     def disponivel(self) -> bool:
         """Pode ser sobrescrito para checar credenciais/conectividade."""

@@ -15,7 +15,7 @@ if not exist ".venv" (
     call .venv\Scripts\activate
 )
 
-start "API - Captacao" cmd /k "cd /d %~dp0backend && call .venv\Scripts\activate && uvicorn app.main:app --reload --port 8000"
+start "API - Captacao" cmd /k "cd /d %~dp0backend && call .venv\Scripts\activate && uvicorn app.main:app --reload --port 8001"
 
 timeout /t 2 >nul
 
@@ -25,6 +25,6 @@ timeout /t 2 >nul
 start http://localhost:5500
 
 echo.
-echo API:   http://localhost:8000/docs
+echo API:   http://localhost:8001/docs
 echo Front: http://localhost:5500
 echo.

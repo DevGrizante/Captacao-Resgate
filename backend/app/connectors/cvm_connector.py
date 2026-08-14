@@ -28,6 +28,7 @@ import pandas as pd
 import requests
 
 from app.config import CACHE_DIR, settings
+from app.connectors import cvm_cadastro
 from app.connectors.base import DataConnector
 
 
@@ -37,6 +38,15 @@ class CVMConnector(DataConnector):
     def __init__(self) -> None:
         self.base = settings.CVM_BASE_URL.rstrip("/")
         self.meses = settings.CVM_MESES_INFORME
+        self._janelas: list[dict] = []
+        self._data_referencia: str | None = None
+
+    def metadados(self) -> dict:
+        return {
+            "arquivo": f"CVM · informe diário ({self.meses} meses)",
+            "data_referencia": self._data_referencia,
+            "janelas": self._janelas,
+        }
 
     # ---------- utilidades ----------
     def _meses_recentes(self, n: int) -> list[str]:
@@ -79,18 +89,14 @@ class CVMConnector(DataConnector):
         return df
 
     def _baixar_cadastro(self) -> pd.DataFrame:
-        url = "https://dados.cvm.gov.br/dados/FI/CAD/DADOS/cad_fi.csv"
-        cache_file = CACHE_DIR / "cad_fi.parquet"
-        if cache_file.exists():
-            return pd.read_parquet(cache_file)
-        resp = requests.get(url, timeout=120)
-        resp.raise_for_status()
-        df = pd.read_csv(io.BytesIO(resp.content), sep=";", encoding="latin-1", low_memory=False)
-        try:
-            df.to_parquet(cache_file)
-        except Exception:
-            pass
-        return df
+        """Nome e gestor por CNPJ, do registro pós-Resolução 175.
+
+        Antes isto lia `cad_fi.csv`, que virou acervo legado: tem 21 fundos
+        ativos contra 46.572 cancelados, então praticamente todo fundo do
+        informe ficava sem nome e sem gestora. Ver `connectors/cvm_cadastro.py`.
+        """
+        cad = cvm_cadastro.carregar(apenas_ativos=False)
+        return cad.rename(columns={"gestor": "gestora"})[["nome", "gestora"]]
 
     def _baixar_cda(self) -> dict:
         """
@@ -227,23 +233,32 @@ class CVMConnector(DataConnector):
         
         corte_2w = ref - timedelta(days=14)
         pl_2semanas = inf[inf["data"] <= corte_2w].sort_values("data").groupby("cnpj")["pl"].last()
-        
-        # Agrupa PL por semana para a série temporal
-        inf["semana"] = inf["data"].dt.to_period("W").apply(lambda r: r.start_time.strftime("%Y-%m-%d"))
-        historico_pl = inf.groupby(["cnpj", "semana"])["pl"].last().unstack(fill_value=0.0)
 
-        # 3) Cadastro para gestor/nome.
+        # Fluxo líquido por semana, chaveado pela data de FIM da semana — mesmo
+        # contrato do conector "vinculado", para o pipeline montar a série
+        # temporal sem saber de qual fonte veio.
+        periodo = inf["data"].dt.to_period("W")
+        inf["semana"] = periodo.apply(lambda r: r.end_time.strftime("%Y-%m-%d"))
+        historico = inf.groupby(["cnpj", "semana"])["fluxo"].sum().unstack(fill_value=0.0)
+        self._janelas = [
+            {
+                "chave": p.end_time.strftime("%Y-%m-%d"),
+                "inicio": p.start_time.strftime("%Y-%m-%d"),
+                "fim": p.end_time.strftime("%Y-%m-%d"),
+                "rotulo": f"{p.start_time.strftime('%d/%m/%Y')} - {p.end_time.strftime('%d/%m/%Y')}",
+                "curto": p.end_time.strftime("%d/%m"),
+            }
+            for p in sorted(periodo.dropna().unique())
+        ]
+        self._data_referencia = ref.strftime("%Y-%m-%d")
+
+        # 3) Cadastro para gestor/nome. Indexado por CNPJ só de dígitos — o
+        # informe traz o CNPJ formatado, o registro não.
         try:
             cad = self._baixar_cadastro()
-            col_c_cnpj = _first_col(cad, ["CNPJ_FUNDO", "CNPJ_FUNDO_CLASSE"])
-            col_gestor = _first_col(cad, ["GESTOR"])
-            col_nome = _first_col(cad, ["DENOM_SOCIAL"])
-            cad = cad[[c for c in [col_c_cnpj, col_gestor, col_nome] if c]].copy()
-            cad.columns = ["cnpj", "gestora", "nome"][: len(cad.columns)]
-            cad = cad.drop_duplicates("cnpj").set_index("cnpj")
         except Exception as e:  # noqa: BLE001
             print(f"[CVM] falha no cadastro: {e}")
-            cad = pd.DataFrame(columns=["gestora", "nome"])
+            cad = pd.DataFrame(columns=["nome", "gestora"])
 
         # 4) Composicao via CDA
         comp_cda = self._baixar_cda()
@@ -254,8 +269,9 @@ class CVMConnector(DataConnector):
         for cnpj in cnpjs:
             pl = float(pl_ult.get(cnpj, 0.0) or 0.0)
             semanal = float(agg["semanal"].get(cnpj, 0.0))
-            info = cad.loc[cnpj] if cnpj in cad.index else None
-            
+            chave = cvm_cadastro.so_digitos(cnpj)
+            info = cad.loc[chave] if chave in cad.index else None
+
             cda_f = comp_cda.get(cnpj, {"pct_lf": 0.0, "pct_ipca": 0.0, "pct_cdi": 0.0})
 
             fundos.append({
@@ -267,8 +283,8 @@ class CVMConnector(DataConnector):
                 "mensal": float(agg["mensal"].get(cnpj, 0.0)),
                 "semestral": float(agg["semestral"].get(cnpj, 0.0)),
                 "pl": pl,
-                "pl_2semanas": float(pl_2semanas.get(cnpj, pl)),
-                "historico_pl": historico_pl.loc[cnpj].to_dict() if cnpj in historico_pl.index else {},
+                "pl_anterior": float(pl_2semanas.get(cnpj, pl)),
+                "historico_semanal": historico.loc[cnpj].to_dict() if cnpj in historico.index else {},
                 # Composição inicial preenchida via CDA
                 "pct_lf": cda_f["pct_lf"],
                 "pct_ipca": cda_f["pct_ipca"],

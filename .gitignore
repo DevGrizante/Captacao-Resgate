@@ -12,6 +12,13 @@ venv/
 data/cache/*
 !data/cache/.gitkeep
 
+# Anexos vinculado_*.xlsx baixados do e-mail — dado de cliente, não versionar
+data/inbox/*
+!data/inbox/.gitkeep
+
+# Relatórios gerados (scripts/relatorio_cobertura.py)
+data/relatorios/
+
 # IDE
 .vscode/
 .idea/

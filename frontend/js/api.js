@@ -1,5 +1,5 @@
 // Camada de acesso à API. Ajuste API_BASE se o backend rodar em outra porta/host.
-const API_BASE = window.API_BASE || "http://localhost:8000";
+const API_BASE = window.API_BASE || "http://localhost:8001";
 
 async function apiGet(path) {
   const resp = await fetch(`${API_BASE}${path}`);

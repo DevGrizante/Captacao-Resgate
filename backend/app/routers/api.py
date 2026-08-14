@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.models.schemas import (
     DashboardResponse,
     DossieResponse,
+    FonteInfo,
     MoverGestora,
     StressFundo,
 )
@@ -61,8 +62,26 @@ def get_stress(
     return pipeline.stress(limite, janela, indexador, abertos)
 
 
+@router.get("/fonte", response_model=FonteInfo)
+def get_fonte():
+    """De onde vieram os dados em cache e o que essa fonte não entrega."""
+    return pipeline.fonte_info()
+
+
 @router.post("/admin/refresh")
 def post_refresh():
-    """Força recálculo do pipeline (após atualizar dados da fonte)."""
+    """Recarrega a fonte e recalcula o pipeline.
+
+    Na fonte "vinculado" isso também re-varre a pasta do Outlook: se chegou um
+    e-mail novo com anexo, é ele que passa a valer. É o botão para apertar
+    depois que o e-mail da manhã cai na caixa.
+    """
     pipeline.refresh()
-    return {"status": "ok", "message": "Pipeline recalculado."}
+    info = pipeline.fonte_info()
+    return {
+        "status": "ok",
+        "message": "Pipeline recalculado.",
+        "fonte": info.fonte,
+        "arquivo": info.arquivo,
+        "recebido_em": info.recebido_em,
+    }

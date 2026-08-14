@@ -1,15 +1,16 @@
 """
-Regenera data/mock_fundos.json a partir de um Excel no formato "vinculado".
+Regenera data/mock_fundos.json a partir de um `vinculado_*.xlsx`.
 
 Uso:
-    python scripts/gerar_mock.py caminho/para/vinculado.xlsx
+    python scripts/gerar_mock.py                      # usa o último da inbox
+    python scripts/gerar_mock.py caminho/vinculado.xlsx
 
-O Excel deve ter, na linha 3 (header=2), as colunas:
-    Nome | Gestão | Diária | Semanal | Mensal | Semestral | ...janelas semanais...
+O mock existe só para desenvolver o front offline. Os FLUXOS são reais (vêm do
+arquivo, lidos pelo VinculadoConnector); PL, composição, duration, cotização e
+taxa são SINTÉTICOS (seed fixa).
 
-Fluxos são reais (do arquivo); duration/cotização/taxa/composição são
-sintéticos porém estáveis (seed fixa) — apenas para validar o front até
-plugar CVM + Quantum.
+>>> Não use DATA_SOURCE=mock para decisão de mesa. Para dado real, use
+    DATA_SOURCE=vinculado, que deixa os campos sintéticos vazios.
 """
 from __future__ import annotations
 
@@ -18,24 +19,28 @@ import random
 import sys
 from pathlib import Path
 
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-OUT = BASE_DIR / "data" / "mock_fundos.json"
+from app.config import DATA_DIR  # noqa: E402
+from app.connectors.vinculado_connector import VinculadoConnector  # noqa: E402
+from app.services import outlook_inbox  # noqa: E402
+
+OUT = DATA_DIR / "mock_fundos.json"
 
 
-def main(xlsx_path: str) -> None:
+def main(xlsx_path: str | None) -> None:
     random.seed(42)
-    df = pd.read_excel(xlsx_path, sheet_name=0, header=2)
-    df.columns = ["Nome", "Gestao", "Diaria", "Semanal", "Mensal", "Semestral"] + list(df.columns[6:])
-    df = df[df["Nome"].notna()].copy()
-    for c in ["Diaria", "Semanal", "Mensal", "Semestral"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    caminho = Path(xlsx_path) if xlsx_path else outlook_inbox.arquivo_mais_recente()
+    if caminho is None:
+        print("Nenhum vinculado_*.xlsx em data/inbox/. Passe o caminho como argumento.")
+        sys.exit(1)
 
-    fundos = []
-    for _, r in df.iterrows():
-        nome = str(r["Nome"]).upper()
-        h = abs(hash(r["Gestao"])) % 1000 / 1000
+    conn = VinculadoConnector(caminho=caminho)
+    fundos = conn.carregar_fundos()
+
+    for f in fundos:
+        nome = f["nome"].upper()
+        h = abs(hash(f["gestora"])) % 1000 / 1000
         # Fundos com cara de renda fixa/DI têm chance de LF majoritária,
         # para o bucket LF aparecer povoado ao validar o front.
         is_rf = any(k in nome for k in ["RENDA FIXA", "REFERENCIADO DI", "RF ", "FIRF"])
@@ -45,38 +50,28 @@ def main(xlsx_path: str) -> None:
             pct_lf = round(min(0.30, 0.03 + h * 0.22), 3)
         resto = 1 - pct_lf
         ipca_share = 0.25 + h * 0.4
-        pct_ipca = round(resto * ipca_share, 3)
-        pct_cdi = round(resto * (1 - ipca_share) * 0.85, 3)
-        pl = abs(r["Semestral"]) * 3 + random.uniform(1e7, 5e8)
-        dmais = random.choice([1, 5, 15, 30, 45, 60, 90, 180])
-        fundos.append({
-            "cnpj": f"{random.randint(10,99)}.{random.randint(100,999)}."
-                    f"{random.randint(100,999)}/0001-{random.randint(10,99)}",
-            "nome": str(r["Nome"]),
-            "gestora": str(r["Gestao"]),
-            "diaria": float(r["Diaria"]),
-            "semanal": float(r["Semanal"]),
-            "mensal": float(r["Mensal"]),
-            "semestral": float(r["Semestral"]),
+        pl = abs(f["semestral"]) * 3 + random.uniform(1e7, 5e8)
+
+        f.update({
+            # O CNPJ real vem da planilha e é preservado — é o que permite
+            # exercitar o casamento com a CVM também no mock.
             "pl": round(pl, 2),
+            "pl_anterior": round(pl * random.uniform(0.94, 1.06), 2),
             "pct_lf": pct_lf,
-            "pct_ipca": pct_ipca,
-            "pct_cdi": pct_cdi,
+            "pct_ipca": round(resto * ipca_share, 3),
+            "pct_cdi": round(resto * (1 - ipca_share) * 0.85, 3),
             "duration": round(random.uniform(1.5, 5.5), 1),
-            "cotizacao_resgate": dmais,
+            "cotizacao_resgate": random.choice([1, 5, 15, 30, 45, 60, 90, 180]),
             "taxa_adm": round(random.uniform(0.35, 0.95), 2),
             "aberto_captacao": random.random() > 0.30,
-            "resgate_pct_pl_semana": round(r["Semanal"] / pl, 4) if pl > 0 else 0.0,
+            "resgate_pct_pl_semana": round(f["semanal"] / pl, 4) if pl > 0 else 0.0,
         })
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump(fundos, f, ensure_ascii=False)
-    print(f"OK — {len(fundos)} fundos gravados em {OUT}")
+    with open(OUT, "w", encoding="utf-8") as fh:
+        json.dump(fundos, fh, ensure_ascii=False)
+    print(f"OK — {len(fundos)} fundos gravados em {OUT} (a partir de {caminho.name})")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Uso: python scripts/gerar_mock.py caminho/para/vinculado.xlsx")
-        sys.exit(1)
-    main(sys.argv[1])
+    main(sys.argv[1] if len(sys.argv) > 1 else None)
