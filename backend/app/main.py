@@ -12,13 +12,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import api
+from app.routers import admin, api
+from app.services import parametros
+
+# Os parâmetros gravados pelo painel de controle precisam valer ANTES de
+# qualquer classificação — e o pipeline classifica na primeira requisição.
+# Aplicar aqui, no import do módulo, garante que não existe uma janela em que
+# a API responde com o corte do .env enquanto o painel mostra outro.
+parametros.carregar_do_disco()
 
 app = FastAPI(
     title="Captação e Resgate · Crédito Privado",
     description="Consolidação de captação/resgate de fundos de crédito privado, "
-                "classificados por indexador (IPCA+ / CDI+ / LF / Misto).",
-    version="0.1.0",
+                "classificados em LF / Incentivada / Tradicional / Misto.",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -30,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(api.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")
@@ -44,4 +52,9 @@ def health():
         "quantum_enabled": settings.QUANTUM_ENABLED,
         "outlook_enabled": settings.OUTLOOK_ENABLED,
         "ultimo_arquivo": ultimo.name if ultimo else None,
+        # O corte vigente entra no health de propósito: é o parâmetro que muda
+        # o que a tela mostra, e o primeiro a se conferir quando alguém
+        # estranha a classificação.
+        "corte_classificacao_pct": round(settings.THRESHOLD_MAJORITARIO * 100, 2),
+        "hedge_dap_minimo_pct": round(settings.HEDGE_DAP_MINIMO * 100, 2),
     }

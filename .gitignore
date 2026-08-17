@@ -19,6 +19,14 @@ data/inbox/*
 # Relatórios gerados (scripts/relatorio_cobertura.py)
 data/relatorios/
 
+# Parâmetros gravados pelo painel de controle. É estado local da máquina: o
+# valor que o projeto entrega vive em backend/.env.example.
+data/parametros.json
+data/parametros.json.tmp
+
+# Gerado pelo Iniciar.bat com a porta real em que a API subiu.
+frontend/js/config.js
+
 # IDE
 .vscode/
 .idea/

@@ -37,7 +37,17 @@ function fmtMes(iso) {
   return `${MESES_CURTOS[Number(m) - 1] || m}/${a}`;
 }
 
-const bucketLabel = { ipca: ["badge-ipca", "IPCA+"], cdi: ["badge-cdi", "CDI+"], lf: ["badge-lf", "LF"], misto: ["badge-misto", "Misto"] };
+// Vocabulário único dos buckets: rótulo, cor, classe de badge e o nome do
+// campo agregado correspondente. Antes isso estava espalhado por cinco pontos
+// da tela, e renomear "IPCA+" para "Incentivada" exigia acertar os cinco.
+const BUCKETS = {
+  incentivada: { rotulo: "Incentivada", curto: "Incentivada", cor: "#a855f7", bg: "bg-purple-500", badge: "badge-incentivada", texto: "text-purple-400" },
+  tradicional: { rotulo: "Tradicional", curto: "Tradicional", cor: "#3b82f6", bg: "bg-blue-500", badge: "badge-tradicional", texto: "text-blue-400" },
+  lf:          { rotulo: "Letras Financeiras", curto: "LF", cor: "#f59e0b", bg: "bg-amber-500", badge: "badge-lf", texto: "text-amber-400" },
+  misto:       { rotulo: "Misto", curto: "Misto", cor: "#64748b", bg: "bg-slate-500", badge: "badge-misto", texto: "text-slate-400" },
+};
+const ORDEM_BUCKETS = ["incentivada", "tradicional", "lf", "misto"];
+
 const nomesFonte = { vinculado: "planilha do e-mail (Quantum Axis)", cvm: "dados abertos da CVM", mock: "MOCK — valores sintéticos" };
 
 // Nome amigável dos campos que a fonte não entrega, para o aviso do topo.
@@ -130,10 +140,15 @@ function renderFonte() {
   // (vem defasada de propósito) e que não é o mesmo eixo do perfil da cota.
   if (f.fundos_com_carteira) {
     linhas.push(
-      `<strong>Bucket (IPCA+ / CDI+ / LF / Misto) vem da carteira declarada à CVM</strong> ` +
-      `no CDA de ${fmtMes(f.carteira_data)}, cruzada com o registro de debêntures do SND. ` +
+      `<strong>A classificação (LF / Incentivada / Tradicional / Misto) vem da carteira ` +
+      `declarada à CVM</strong> no CDA de ${fmtMes(f.carteira_data)}, cruzada com o registro ` +
+      `de debêntures do SND e com as posições em futuro de DAP. ` +
       `${pct(f.fundos_com_carteira)}. A defasagem é proposital: no mês corrente ` +
       `46% do PL fica sob sigilo e a carteira visível seria uma amostra enviesada. ` +
+      `<em>Incentivada</em> exige duas coisas ao mesmo tempo: o nome do fundo trazer ` +
+      `“Incentivada/o” e a carteira operar IPCA+ de fato — comprar em B + spread e ` +
+      `travar o cupom de inflação em DAP. Nome sem carteira que confirme cai em ` +
+      `<em>Misto</em>, com o motivo visível no dossiê. ` +
       `Fundo com muito sigilo, indexador desconhecido em boa parte da carteira ou ` +
       `pouco crédito perto do PL fica <em>sem classificação</em> — nunca com bucket ` +
       `adivinhado.`);
@@ -259,16 +274,14 @@ function renderBuckets() {
   if (!temIndexador()) {
     box.innerHTML = "";
     vazio.textContent =
-      `Os ${DATA.total_fundos.toLocaleString("pt-BR")} fundos desta carga estão sem classificação por indexador: ` +
-      `a planilha do e-mail traz o fluxo, mas não a composição da carteira. A quebra IPCA+ / CDI+ / LF / Misto ` +
-      `volta assim que a API do Quantum Axis for liberada.`;
+      `Os ${DATA.total_fundos.toLocaleString("pt-BR")} fundos desta carga estão sem classificação: ` +
+      `a planilha do e-mail traz o fluxo, mas não a composição da carteira. A quebra ` +
+      `LF / Incentivada / Tradicional / Misto volta assim que a API do Quantum Axis for liberada.`;
     vazio.classList.remove("hidden");
     return;
   }
 
   vazio.classList.add("hidden");
-  const cores = { ipca: "bg-purple-500", cdi: "bg-blue-500", lf: "bg-amber-500", misto: "bg-slate-500" };
-  const nomes = { ipca: "IPCA+", cdi: "CDI+", lf: "Letras Financeiras", misto: "Misto" };
   const maxAbs = Math.max(...DATA.buckets.map(b => Math.abs(b.fluxo))) || 1;
   box.innerHTML = DATA.buckets.map(b => {
     const pct = Math.abs(b.fluxo) / maxAbs * 100;
@@ -279,12 +292,13 @@ function renderBuckets() {
       b.cotizacao_media !== null ? `cot. D+${b.cotizacao_media}` : null,
       b.pct_abertos !== null ? `${(b.pct_abertos * 100).toFixed(0)}% abertos` : null,
     ].filter(Boolean).join(" · ");
+    const meta = BUCKETS[b.bucket] || { rotulo: b.bucket, bg: "bg-slate-500" };
     return `<div class="group cursor-pointer hover:bg-slate-900/50 p-2 -mx-2 rounded transition-colors" onclick="openIdxDossie('${b.bucket}')">
       <div class="flex items-center justify-between text-xs mb-1">
-        <span class="flex items-center gap-2 group-hover:text-blue-400"><span class="w-2 h-2 rounded-full ${cores[b.bucket]}"></span>${nomes[b.bucket]}</span>
+        <span class="flex items-center gap-2 group-hover:text-blue-400"><span class="w-2 h-2 rounded-full ${meta.bg}"></span>${meta.rotulo}</span>
         <span class="${cls(b.fluxo)} font-mono">${fmtBRL(b.fluxo)}</span>
       </div>
-      <div class="h-1.5 bg-slate-800 rounded"><div class="h-full ${cores[b.bucket]} rounded" style="width:${pct}%"></div></div>
+      <div class="h-1.5 bg-slate-800 rounded"><div class="h-full ${meta.bg} rounded" style="width:${pct}%"></div></div>
       <p class="text-[10px] text-slate-500 mt-1">${detalhes}</p>
     </div>`;
   }).join("");
@@ -306,14 +320,9 @@ function renderTimeline() {
 
   // Quebra por indexador só existe quando há composição de carteira. Sem ela,
   // a série vira uma linha só: o fluxo líquido total.
-  const porIndexador = s[0].ipca !== null && s[0].ipca !== undefined;
+  const porIndexador = s[0].incentivada !== null && s[0].incentivada !== undefined;
   const series = porIndexador
-    ? [
-        { label: "IPCA+", key: "ipca", cor: "#a855f7" },
-        { label: "CDI+", key: "cdi", cor: "#3b82f6" },
-        { label: "LF", key: "lf", cor: "#f59e0b" },
-        { label: "Misto", key: "misto", cor: "#64748b" },
-      ]
+    ? ORDEM_BUCKETS.map(k => ({ label: BUCKETS[k].curto, key: k, cor: BUCKETS[k].cor }))
     : [{ label: "Fluxo líquido", key: "total", cor: "#3b82f6" }];
 
   legenda.innerHTML = series.map(d =>
@@ -378,7 +387,7 @@ const COLUNAS = {
   fluxo: [
     ["Fundos", "c", g => g.fundos],
     ["PL", "d", g => ou(g.pl, v => fmtBRL(v).replace("+", ""))],
-    ["Mix IPCA/CDI/LF", "c", g => barraMix(g)],
+    ["Mix da classificação", "c", g => barraMix(g)],
     ["Diária", "d", g => num(g.diaria)],
     ["Semanal", "d", g => num(g.semanal)],
     ["Mensal", "d", g => num(g.mensal)],
@@ -434,10 +443,13 @@ const CORES_PERFIL = {
 function num(v) { return `<span class="${cls(v)}">${fmtBRL(v)}</span>`; }
 
 function barraMix(g) {
-  if (g.mix_ipca === null) return `<span class="text-slate-600">${VAZIO}</span>`;
-  const p = [["mix_ipca", "bg-purple-500"], ["mix_cdi", "bg-blue-500"], ["mix_lf", "bg-amber-500"], ["mix_misto", "bg-slate-600"]];
-  return `<div class="flex h-1.5 w-28 rounded overflow-hidden mx-auto" title="IPCA+ ${(g.mix_ipca*100).toFixed(0)}% · CDI+ ${(g.mix_cdi*100).toFixed(0)}% · LF ${(g.mix_lf*100).toFixed(0)}% · Misto ${(g.mix_misto*100).toFixed(0)}%">
-    ${p.map(([k, c]) => `<div style="width:${g[k]*100}%" class="${c}"></div>`).join("")}</div>`;
+  if (g.mix_incentivada === null || g.mix_incentivada === undefined) {
+    return `<span class="text-slate-600">${VAZIO}</span>`;
+  }
+  const titulo = ORDEM_BUCKETS
+    .map(k => `${BUCKETS[k].curto} ${((g[`mix_${k}`] || 0) * 100).toFixed(0)}%`).join(" · ");
+  return `<div class="flex h-1.5 w-28 rounded overflow-hidden mx-auto" title="${titulo}">
+    ${ORDEM_BUCKETS.map(k => `<div style="width:${(g[`mix_${k}`] || 0) * 100}%" class="${BUCKETS[k].bg}"></div>`).join("")}</div>`;
 }
 
 // Mix por instrumento. O trecho cinza ao fim é o que não é debênture/LF/CDB/
@@ -611,19 +623,21 @@ async function openDossie(nome) {
     }).join("");
   }
 
-  const parts = [["mix_ipca", "bg-purple-500", "IPCA+", "text-purple-400"], ["mix_cdi", "bg-blue-500", "CDI+", "text-blue-400"], ["mix_lf", "bg-amber-500", "LF", "text-amber-400"], ["mix_misto", "bg-slate-600", "Misto", "text-slate-400"]];
   const barra = document.getElementById("d-mix-bar");
   const legenda = document.getElementById("d-mix-legend");
   // De quando é a carteira. O CDA vem defasado de propósito, e um bucket lido
   // como "hoje" quando é de quatro meses atrás é erro de leitura na mesa.
   document.getElementById("d-mix-fonte").textContent =
     g.carteira_data ? `· carteira declarada à CVM em ${fmtMes(g.carteira_data)}` : "";
-  if (g.mix_ipca === null) {
+  if (g.mix_incentivada === null || g.mix_incentivada === undefined) {
     barra.innerHTML = `<div class="bg-slate-800 w-full"></div>`;
     legenda.innerHTML = `<div class="col-span-4 text-slate-600">Composição da carteira não disponível nesta fonte</div>`;
   } else {
-    barra.innerHTML = parts.map(([k, c]) => `<div class="${c}" style="width:${g[k] * 100}%"></div>`).join("");
-    legenda.innerHTML = parts.map(([k, , label, tc]) => `<div><div class="font-semibold ${tc}">${(g[k] * 100).toFixed(0)}%</div><div class="text-slate-600">${label}</div></div>`).join("");
+    barra.innerHTML = ORDEM_BUCKETS
+      .map(k => `<div class="${BUCKETS[k].bg}" style="width:${(g[`mix_${k}`] || 0) * 100}%"></div>`).join("");
+    legenda.innerHTML = ORDEM_BUCKETS.map(k =>
+      `<div><div class="font-semibold ${BUCKETS[k].texto}">${((g[`mix_${k}`] || 0) * 100).toFixed(0)}%</div>
+       <div class="text-slate-600">${BUCKETS[k].curto}</div></div>`).join("");
   }
 
   // Mix por INSTRUMENTO — eixo diferente do bucket. As fatias não fecham 100%
@@ -647,10 +661,12 @@ async function openDossie(nome) {
 
   if (sparkChart) sparkChart.destroy();
   const ds = [];
-  if (d.sparkline_ipca && d.sparkline_ipca.some(v => v !== 0)) ds.push({ label: "IPCA+", data: d.sparkline_ipca, backgroundColor: "#a855f7", borderRadius: 2 });
-  if (d.sparkline_cdi && d.sparkline_cdi.some(v => v !== 0)) ds.push({ label: "CDI+", data: d.sparkline_cdi, backgroundColor: "#3b82f6", borderRadius: 2 });
-  if (d.sparkline_lf && d.sparkline_lf.some(v => v !== 0)) ds.push({ label: "LF", data: d.sparkline_lf, backgroundColor: "#f59e0b", borderRadius: 2 });
-  if (d.sparkline_misto && d.sparkline_misto.some(v => v !== 0)) ds.push({ label: "Misto", data: d.sparkline_misto, backgroundColor: "#64748b", borderRadius: 2 });
+  for (const k of ORDEM_BUCKETS) {
+    const serie = d[`sparkline_${k}`];
+    if (serie && serie.some(v => v !== 0)) {
+      ds.push({ label: BUCKETS[k].curto, data: serie, backgroundColor: BUCKETS[k].cor, borderRadius: 2 });
+    }
+  }
   if (!ds.length) {
     ds.push({ label: "Fluxo total", data: d.sparkline, backgroundColor: d.sparkline.map(v => v >= 0 ? "#10b981" : "#ef4444"), borderRadius: 2 });
   }
@@ -665,7 +681,7 @@ async function openDossie(nome) {
   });
 
   document.getElementById("d-fundos").innerHTML = d.fundos.map(f => {
-    const b = bucketLabel[f.bucket];
+    const b = BUCKETS[f.bucket];
     // Subtítulo: bucket quando houver, e a data da declaração de taxa/cotização
     // — sem ela o broker não sabe se a taxa é de ontem ou de 2022.
     // Perfil observado vem com a origem colada: "CDI" declarado e "CDI"
@@ -676,20 +692,32 @@ async function openDossie(nome) {
       ? `<span class="px-1 rounded" style="background:${f.perfil_indexador === "pos" ? "#164e63" : "#831843"};color:#e2e8f0"
            title="${f.perfil_indexador_origem === "declarado" ? "Benchmark declarado" : "Inferido pela volatilidade"}: ${f.perfil_indexador_detalhe || ""}">${perfilTxt}${f.perfil_indexador_origem === "inferido" ? "?" : ""}</span>`
       : null;
-    // O bucket leva a carteira que o gerou no title: sem isso o usuário vê
-    // "IPCA+" e não tem como conferir de onde saiu nem de quando é.
+    // O badge leva no title a regra que o gerou E a carteira que a sustenta:
+    // sem isso o usuário vê "Incentivada" e não tem como conferir de onde
+    // saiu, de quando é, nem por que o fundo vizinho de nome parecido não é.
     const pctTxt = v => `${((v || 0) * 100).toFixed(0)}%`;
-    const bucketTitle = f.carteira_data
-      ? `Carteira de ${fmtMes(f.carteira_data)}: LF ${pctTxt(f.pct_lf)} · IPCA ${pctTxt(f.pct_ipca)} · ` +
-        `CDI ${pctTxt(f.pct_cdi)} · pré ${pctTxt(f.pct_pre)}` +
-        (f.carteira_pct_pl ? ` (crédito = ${f.carteira_pct_pl.toFixed(0)}% do PL)` : "")
-      : "";
+    const bucketTitle = [
+      f.bucket_motivo,
+      f.carteira_data
+        ? `Carteira de ${fmtMes(f.carteira_data)}: LF ${pctTxt(f.pct_lf)} · IPCA ${pctTxt(f.pct_ipca)} · ` +
+          `CDI ${pctTxt(f.pct_cdi)} · pré ${pctTxt(f.pct_pre)}` +
+          (f.carteira_pct_pl ? ` (crédito = ${f.carteira_pct_pl.toFixed(0)}% do PL)` : "")
+        : null,
+      // A cobertura de DAP é o que separa "compra IPCA+" de "compra IPCA+ e
+      // fica só com o spread". Só aparece quando há o que mostrar.
+      f.dap_cobertura ? `Hedge em DAP: ${(f.dap_cobertura * 100).toFixed(0)}% da carteira IPCA+` : null,
+    ].filter(Boolean).join(" | ").replace(/"/g, "'");
     const detalhe = [
-      b ? `<span class="${b[0]} px-1 rounded" title="${bucketTitle}">${b[1]}</span>` : null,
+      b ? `<span class="${b.badge} px-1 rounded" title="${bucketTitle}">${b.curto}</span>` : null,
       // Sem bucket, dizer POR QUE vale mais que deixar a lacuna sem explicação
       // — o usuário precisa saber se é falta de declaração ou dado insuficiente.
       (!b && f.carteira_motivo)
         ? `<span class="text-slate-600" title="Apareceu no CDA, mas não passou nas guardas de qualidade">sem bucket: ${f.carteira_motivo}</span>`
+        : null,
+      // Nome diz "incentivada" e o bucket não: é o caso que mais gera dúvida
+      // na mesa, e o motivo precisa estar visível sem passar o mouse.
+      (f.nome_incentivado && f.bucket !== "incentivada" && f.bucket_motivo)
+        ? `<span class="badge-warn px-1 rounded" title="${bucketTitle}">nome incentivada, carteira não confirma</span>`
         : null,
       perfilBadge,
       f.classificacao_anbima,
@@ -762,9 +790,8 @@ function bindTabs(id, key, cb) {
 function esc(s) { return s.replace(/'/g, "\\'"); }
 
 async function openIdxDossie(bucket) {
-  const cores = { ipca: "bg-purple-500", cdi: "bg-blue-500", lf: "bg-amber-500", misto: "bg-slate-500" };
-  const nomes = { ipca: "IPCA+", cdi: "CDI+", lf: "Letras Financeiras", misto: "Misto" };
-  
+  const meta = BUCKETS[bucket] || { rotulo: bucket, bg: "bg-slate-500" };
+
   // Buscar os dados do dashboard filtrados para este indexador
   const res = await API.dashboard({ ...state, indexador: bucket });
   const w = state.janela;
@@ -782,7 +809,7 @@ async function openIdxDossie(bucket) {
     </div>`;
   };
 
-  document.getElementById("idx-d-name").innerHTML = `<span class="w-3 h-3 rounded-full ${cores[bucket]}"></span> ${nomes[bucket]}`;
+  document.getElementById("idx-d-name").innerHTML = `<span class="w-3 h-3 rounded-full ${meta.bg}"></span> ${meta.rotulo}`;
   document.getElementById("idx-d-window-cap").textContent = `janela ${state.janela}`;
   document.getElementById("idx-d-window-res").textContent = `janela ${state.janela}`;
 

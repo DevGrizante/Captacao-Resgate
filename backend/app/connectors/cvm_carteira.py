@@ -1,11 +1,14 @@
 """
 Composição da carteira pelo CDA da CVM — o bucket de verdade.
 
->>> ISTO É O BUCKET (IPCA+ / CDI+ / LF / Misto).
+>>> ISTO ALIMENTA O BUCKET (LF / Incentivada / Tradicional / Misto).
     Não confundir com `services/perfil_indexador.py`, que mede outra coisa: a
     exposição do cotista. Aqui medimos QUE PAPEL O FUNDO CARREGA, que é a
     pergunta da mesa de crédito. As duas divergem muito, e a divergência é
     informação — ver a nota no fim deste texto.
+
+    A regra que transforma estes números em bucket vive em
+    `services/classifier.py`; aqui só se mede.
 
 DE ONDE VEM CADA PEDAÇO
 
@@ -13,6 +16,9 @@ DE ONDE VEM CADA PEDAÇO
     BLC_5  LF/CDB/DPGE    -> `DS_INDEXADOR_POSFX` declarado no próprio arquivo
     BLC_6  títulos IF ext.-> idem BLC_5
     BLC_8  CRI/CRA/NP     -> instrumento sim, indexador não (dilui o mix)
+    BLC_8  futuro de DAP  -> a perna de hedge da debênture incentivada, que
+                             separa "carrega juro real" de "fica só com o
+                             spread de crédito". Ver `_posicao_dap`.
 
     BLC_1 (títulos públicos) e BLC_2 (cotas de fundos) ficam de fora: são caixa
     e alocação, não a tese de crédito. Entram só no denominador de "quanto do
@@ -55,6 +61,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import time
 import unicodedata
 import zipfile
@@ -72,10 +79,18 @@ logger = logging.getLogger("cvm_carteira")
 URL_CDA = "https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{aaaamm}.zip"
 
 # Sufixo = versão do schema: mudou coluna, o cache antigo deixa de ser achado.
-_CACHE = CACHE_DIR / "cvm_carteira_v1.parquet"
+# v2 acrescentou as colunas de hedge em DAP.
+_CACHE = CACHE_DIR / "cvm_carteira_v2.parquet"
 
 # Blocos que contêm crédito privado. BLC_1 (público) e BLC_2 (cotas) não entram.
 BLOCOS_CREDITO = (4, 5, 6, 8)
+
+# O futuro de cupom de IPCA aparece no BLC_8 com dois rótulos diferentes,
+# conforme o administrador: alguns preenchem `TP_ATIVO` ("Futuro de DAP:Cupom
+# de DI x IPCA"), outros deixam "Contrato Futuro" genérico e põem o papel em
+# `DS_ATIVO` ("FUT DAP/K35", "DAPFUTQ30", "Futuro de Cupom de IPCA - FUT DAP").
+# Procurar "DAP" nos dois campos juntos cobre as duas convenções.
+_RE_DAP = re.compile(r"\bDAP\b|DAPFUT|FUT ?DAP")
 
 
 def _sem_acento(v) -> str:
@@ -182,13 +197,76 @@ def _linhas_credito(z: zipfile.ZipFile, mes: str, mapa_snd: dict) -> pd.DataFram
     return todas[todas["cnpj"].notna() & (todas["VL_MERC_POS_FINAL"] > 0)]
 
 
+def _posicao_dap(z: zipfile.ZipFile, mes: str) -> pd.Series:
+    """Nocional em futuro de DAP por CNPJ — a perna de hedge da incentivada.
+
+    O DAP (cupom de DI x IPCA) é o contrato com que o fundo de debênture
+    incentivada trava a perna de inflação do papel que comprou em B + spread,
+    ficando só com o spread de crédito. A presença e o tamanho dessa posição
+    são o que separa esse produto do fundo que carrega juro real na cota.
+
+    >>> O NOCIONAL É RECONSTRUÍDO, NÃO LIDO
+
+    O CDA informa `QT_POS_FINAL` (contratos) e `VL_MERC_POS_FINAL` (o ajuste a
+    mercado, que é o resultado do dia e não o tamanho da posição). Um DAP
+    vendido aparece com ajuste de -R$ 1.020.593 num fundo que tem R$ 344 mi de
+    exposição — usar o ajuste como tamanho subestimaria o hedge em duas ordens
+    de grandeza. O nocional vem então dos contratos, pela face de R$ 100 mil da
+    B3 (`DAP_NOCIONAL_CONTRATO`).
+
+    É uma APROXIMAÇÃO: a face é o valor no vencimento, e o contrato negocia por
+    PU descontado, então o nocional real é um pouco menor e varia com o prazo.
+    Serve para o que é usado aqui — comparar ordem de grandeza contra a
+    carteira IPCA+ e decidir se a posição trava a carteira ou é residual.
+    Conferido contra o CDA de 2026-04: a razão nocional/carteira IPCA+ tem
+    mediana 0,75 e p75 0,91, o que é o esperado de um hedge de fato.
+
+    Compradas e vendidas são somadas em módulo de propósito: interessa o
+    tamanho da posição em cupom de IPCA, e as duas pontas aparecem no mesmo
+    fundo (rolagem de vencimento) sem que uma anule a outra economicamente.
+    """
+    nome = f"cda_fi_BLC_8_{mes}.csv"
+    if nome not in z.namelist():
+        return pd.Series(dtype="float64")
+
+    df = pd.read_csv(z.open(nome), sep=";", encoding="latin-1", low_memory=False)
+    if "TP_APLIC" not in df.columns or "QT_POS_FINAL" not in df.columns:
+        logger.warning("BLC_8 %s sem as colunas de derivativo — sem sinal de DAP.", mes)
+        return pd.Series(dtype="float64")
+
+    futuros = df[df["TP_APLIC"].astype(str).str.contains("Futuro", na=False)]
+    if futuros.empty:
+        return pd.Series(dtype="float64")
+
+    # O rótulo do contrato pode estar em qualquer um dos dois campos; ler os
+    # dois juntos evita depender da convenção do administrador.
+    def _texto(coluna: str) -> pd.Series:
+        if coluna not in futuros.columns:
+            return pd.Series("", index=futuros.index)
+        return futuros[coluna].astype(str)
+
+    rotulo = (_texto("TP_ATIVO") + " " + _texto("DS_ATIVO")).map(_sem_acento)
+    dap = futuros[rotulo.str.contains(_RE_DAP, na=False)]
+    if dap.empty:
+        return pd.Series(dtype="float64")
+
+    contratos = pd.to_numeric(dap["QT_POS_FINAL"], errors="coerce").abs()
+    por_cnpj = (
+        dap.assign(cnpj=dap["CNPJ_FUNDO_CLASSE"].map(so_digitos), ctr=contratos)
+        .dropna(subset=["cnpj", "ctr"])
+        .groupby("cnpj")["ctr"].sum()
+    )
+    logger.info("CDA %s: %d fundos com posição em futuro de DAP.", mes, len(por_cnpj))
+    return por_cnpj * settings.DAP_NOCIONAL_CONTRATO
+
+
 def carregar() -> pd.DataFrame:
     """Composição de crédito por CNPJ, indexada pelo CNPJ do fundo.
 
     Colunas: pct_lf, pct_ipca, pct_cdi, pct_pre (frações da carteira de
     crédito), pct_debenture, pct_cdb, pct_cri_cra, carteira_credito,
     carteira_pct_pl, carteira_idx_conhecido_pct, carteira_sigilo_pct,
-    carteira_data.
+    dap_nocional, dap_cobertura, carteira_data.
 
     `pct_ipca`/`pct_cdi`/`pct_pre` medem o indexador do que NÃO é LF: o
     classificador tira LF da conta primeiro (LF é instrumento, não indexador),
@@ -243,6 +321,7 @@ def carregar() -> pd.DataFrame:
         (conhecido + col(por_instr, "lf")) / credito * 100
     )
 
+    _acrescentar_hedge_dap(z, mes, out)
     _acrescentar_pl_e_sigilo(z, mes, out)
     out["carteira_data"] = f"{mes[:4]}-{mes[4:]}"
 
@@ -260,6 +339,46 @@ def carregar() -> pd.DataFrame:
     except Exception as e:  # noqa: BLE001
         logger.debug("cache do CDA: %s", e)
     return out
+
+
+def _acrescentar_hedge_dap(z: zipfile.ZipFile, mes: str, out: pd.DataFrame) -> None:
+    """Preenche dap_nocional e dap_cobertura a partir do BLC_8.
+
+    `dap_cobertura` é o nocional em DAP sobre o R$ da carteira indexada a IPCA
+    — quanto da perna de inflação está travada. Dividir pela carteira IPCA+ e
+    não pela carteira inteira é o que torna o número comparável entre fundos de
+    tamanhos diferentes, e é o que o classificador precisa saber.
+
+    >>> AQUI SÓ SE MEDE. Quem decide se a cobertura configura hedge é o
+        classificador, contra `HEDGE_DAP_MINIMO`. A separação é necessária:
+        o limiar é editável pelo painel de controle, e um booleano gravado no
+        cache do CDA congelaria a régua do dia em que o parquet foi escrito —
+        mexer no painel não reclassificaria nada.
+
+    Fundo sem posição em DAP fica com cobertura 0.0. Aqui a ausência é
+    informação de verdade, não lacuna: o CDA lista as posições em derivativo de
+    todos os fundos, então não aparecer significa não ter.
+    """
+    out["dap_nocional"] = 0.0
+    out["dap_cobertura"] = 0.0
+
+    nocional = _posicao_dap(z, mes)
+    if nocional.empty:
+        return
+
+    out["dap_nocional"] = nocional.reindex(out.index).fillna(0.0)
+    # A base é o R$ em papel IPCA+, não a carteira toda: `pct_ipca` já é a
+    # fração ex-LF, e multiplicá-la pelo crédito devolve o valor em reais.
+    carteira_ipca = out["pct_ipca"] * out["carteira_credito"]
+    com_ipca = carteira_ipca > 0
+    out.loc[com_ipca, "dap_cobertura"] = (
+        out.loc[com_ipca, "dap_nocional"] / carteira_ipca[com_ipca]
+    )
+    logger.info(
+        "CDA %s: %d fundos com carteira IPCA+ coberta por DAP (mediana %.2f).",
+        mes, int((out["dap_cobertura"] > 0).sum()),
+        out.loc[out["dap_cobertura"] > 0, "dap_cobertura"].median() or 0.0,
+    )
 
 
 def _acrescentar_pl_e_sigilo(z: zipfile.ZipFile, mes: str, out: pd.DataFrame) -> None:

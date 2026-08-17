@@ -453,7 +453,10 @@ class CVMCadastroEnricher:
             for campo in ("pct_lf", "pct_ipca", "pct_cdi", "pct_pre",
                           "pct_debenture", "pct_cdb", "pct_cri_cra",
                           "carteira_credito", "carteira_pct_pl",
-                          "carteira_idx_conhecido_pct", "carteira_sigilo_pct"):
+                          "carteira_idx_conhecido_pct", "carteira_sigilo_pct",
+                          # Perna de hedge da incentivada: o classificador
+                          # compara com HEDGE_DAP_MINIMO a cada reclassificação.
+                          "dap_nocional", "dap_cobertura"):
                 f[campo] = _float(linha.get(campo))
             f["carteira_data"] = _texto(linha.get("carteira_data"))
             self.stats["com_carteira"] += 1

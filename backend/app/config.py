@@ -36,7 +36,14 @@ class Settings:
     # Lê o Outlook local via COM. Com false, usa só o que já está em data/inbox.
     OUTLOOK_ENABLED: bool = os.getenv("OUTLOOK_ENABLED", "true").lower() == "true"
     OUTLOOK_PASTA: str = os.getenv("OUTLOOK_PASTA", "Quantum")
-    OUTLOOK_REMETENTE: str = os.getenv("OUTLOOK_REMETENTE", "ottavio.lucca@bgcg.com")
+    # VAZIO = qualquer remetente. O relatório passou a ser encaminhado por mais
+    # de uma pessoa, e travar num endereço fazia o app ficar com o arquivo da
+    # véspera sempre que outra pessoa mandava o do dia. O que identifica o
+    # e-mail é o assunto; preencha isto só para voltar a restringir.
+    OUTLOOK_REMETENTE: str = os.getenv("OUTLOOK_REMETENTE", "")
+    # Casa por SUBSTRING, sem acento e sem caixa: "Captação e resgate" acha
+    # tanto "FW: Captação e resgate" quanto o original sem o prefixo de
+    # encaminhamento. Exigir o "FW:" deixaria de fora o e-mail direto.
     OUTLOOK_ASSUNTO: str = os.getenv("OUTLOOK_ASSUNTO", "Captação e resgate")
     # Quantos e-mails recentes varrer antes de desistir.
     OUTLOOK_MAX_ITENS: int = int(os.getenv("OUTLOOK_MAX_ITENS", "60"))
@@ -121,9 +128,29 @@ class Settings:
     )
     QUANTUM_TOKEN: str = os.getenv("QUANTUM_TOKEN", "")
 
-    # --- Classificação por indexador ---
-    # Limiar para um fundo ser considerado "majoritário" num indexador
-    THRESHOLD_MAJORITARIO: float = float(os.getenv("THRESHOLD_MAJORITARIO", "0.5"))
+    # --- Classificação de fundos (LF vs. fundo de crédito) ---
+    # Corte único da classificação, em fração da carteira (0..1). Governa duas
+    # decisões em sequência: LF domina a carteira? e, no que sobra, o indexador
+    # é majoritário? É EDITÁVEL EM TEMPO DE EXECUÇÃO pelo painel de controle
+    # (ver services/parametros.py) — o valor daqui é só o ponto de partida.
+    THRESHOLD_MAJORITARIO: float = float(os.getenv("THRESHOLD_MAJORITARIO", "0.2"))
+
+    # --- Hedge em DAP (services/classifier.py + connectors/cvm_carteira.py) ---
+    # O fundo de debênture incentivada compra papel em B+spread e vende cupom
+    # de IPCA no futuro de DAP, ficando só com o spread de crédito. Este é o
+    # piso de cobertura para chamar isso de hedge: nocional em DAP sobre o R$
+    # da carteira indexada a IPCA. Medido no CDA de 2026-04, entre os fundos
+    # com posição em DAP a cobertura tem mediana de 0,75 e p10 de 0,20 — abaixo
+    # disso a posição é residual e não trava a carteira.
+    HEDGE_DAP_MINIMO: float = float(os.getenv("HEDGE_DAP_MINIMO", "0.2"))
+    # Face do contrato futuro de DAP na B3. O CDA informa a quantidade de
+    # contratos e o ajuste a mercado, nunca o nocional — ele é reconstruído.
+    DAP_NOCIONAL_CONTRATO: float = float(os.getenv("DAP_NOCIONAL_CONTRATO", "100000"))
+    # Com false, o nome "Incentivada/o" + carteira IPCA+ bastam para o bucket
+    # Incentivada, sem exigir a perna de hedge. Ver a nota em classifier.py.
+    INCENTIVADA_EXIGE_HEDGE_DAP: bool = (
+        os.getenv("INCENTIVADA_EXIGE_HEDGE_DAP", "true").lower() == "true"
+    )
     # Limiar de resgate semanal (fração do PL) para virar sinal de estresse.
     # Só se aplica quando há PL — hoje, só na fonte "cvm"/"mock".
     THRESHOLD_STRESS: float = float(os.getenv("THRESHOLD_STRESS", "0.05"))

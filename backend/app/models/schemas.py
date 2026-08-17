@@ -20,9 +20,15 @@ from pydantic import BaseModel, Field
 
 
 class Bucket(str, Enum):
-    """Classificação por indexador majoritário da carteira."""
-    IPCA = "ipca"
-    CDI = "cdi"
+    """Classificação do fundo. Ver services/classifier.py para a regra.
+
+    INCENTIVADA e TRADICIONAL substituíram os antigos IPCA e CDI: o eixo
+    deixou de ser só o indexador da carteira e passou a combinar o nome do
+    fundo com o comportamento observado dos ativos (compra em B + spread com
+    hedge em DAP, ou carteira atrelada a CDI+).
+    """
+    INCENTIVADA = "incentivada"
+    TRADICIONAL = "tradicional"
     LF = "lf"
     MISTO = "misto"
 
@@ -83,6 +89,14 @@ class Fundo(BaseModel):
     sinais_credito: list[str] = Field(default_factory=list)
     # None = sem composição para classificar (aguardando Quantum).
     bucket: Optional[Bucket] = None
+    # Por que este bucket, em uma frase. É o que explica na tela um fundo com
+    # nome de incentivada que caiu em Misto — sem isso a classificação parece
+    # arbitrária justamente nos casos em que ela é mais informativa.
+    bucket_motivo: Optional[str] = None
+    # O nome do fundo traz "Incentivada"/"Incentivado"? Primeira metade da
+    # dupla verificação; viaja separado para a tela poder confrontá-lo com a
+    # carteira quando os dois discordam.
+    nome_incentivado: Optional[bool] = None
     # Fluxos por janela (R$)
     diaria: float = 0.0
     semanal: float = 0.0
@@ -112,6 +126,13 @@ class Fundo(BaseModel):
     carteira_pct_pl: Optional[float] = None             # quanto do fundo é isso
     carteira_idx_conhecido_pct: Optional[float] = None  # qualidade da leitura
     carteira_sigilo_pct: Optional[float] = None         # % do PL sob sigilo
+    # --- perna de hedge: futuro de DAP (cupom de DI x IPCA) ---
+    # `dap_cobertura` é o nocional em DAP sobre o R$ da carteira IPCA+ — 1.0
+    # significa perna de inflação inteiramente travada. É a MEDIÇÃO; o corte
+    # que a transforma em "tem hedge" é o `HEDGE_DAP_MINIMO`, aplicado na
+    # classificação para acompanhar o painel de controle.
+    dap_nocional: Optional[float] = None
+    dap_cobertura: Optional[float] = None
     # Mês do CDA lido. Vem com defasagem de propósito (o sigilo do mês corrente
     # esconde 46% do PL); a tela precisa dizer de quando é a carteira.
     carteira_data: Optional[str] = None
@@ -142,9 +163,10 @@ class GestoraResumo(BaseModel):
     duration_media: Optional[float] = None
     cotizacao_media: Optional[int] = None
     taxa_adm_media: Optional[float] = None
-    # Mix de composição (fração 0..1). None = sem composição para nenhum fundo.
-    mix_ipca: Optional[float] = None
-    mix_cdi: Optional[float] = None
+    # Mix por classificação (fração 0..1). None = sem composição para nenhum
+    # fundo. `mix_incentivada`/`mix_tradicional` substituíram mix_ipca/mix_cdi.
+    mix_incentivada: Optional[float] = None
+    mix_tradicional: Optional[float] = None
     mix_lf: Optional[float] = None
     mix_misto: Optional[float] = None
     # Fundos da gestora ainda sem classificação de indexador.
@@ -229,8 +251,8 @@ class SerieTemporalPonto(BaseModel):
     rotulo: str          # "06/08/2026 - 12/08/2026"
     curto: str           # "12/08" — o que vai no eixo X
     total: float
-    ipca: Optional[float] = None
-    cdi: Optional[float] = None
+    incentivada: Optional[float] = None
+    tradicional: Optional[float] = None
     lf: Optional[float] = None
     misto: Optional[float] = None
 
@@ -292,8 +314,8 @@ class DossieResponse(BaseModel):
     classe_majoritaria: Optional[str] = None
     sparkline: list[float]           # fluxo das últimas semanas
     sparkline_labels: list[str] = []
-    sparkline_cdi: list[float] = []
-    sparkline_ipca: list[float] = []
+    sparkline_incentivada: list[float] = []
+    sparkline_tradicional: list[float] = []
     sparkline_lf: list[float] = []
     sparkline_misto: list[float] = []
     fundos: list[Fundo]
@@ -323,3 +345,56 @@ class MoverGestora(BaseModel):
     cotizacao_media: Optional[int] = None
     fluxo: float = 0.0
     var_pl_pct: Optional[float] = None
+
+
+# ---------- painel de controle (área admin) ----------
+class ParametroInfo(BaseModel):
+    """Um parâmetro editável, com a régua junto — o painel monta o campo daqui.
+
+    `minimo`/`maximo`/`passo` viajam para o front de propósito: a validação
+    real acontece no backend, mas repetir a faixa na tela evita que o usuário
+    descubra o limite só depois de enviar.
+    """
+    chave: str
+    rotulo: str
+    descricao: str
+    valor: float           # percentual, como o usuário vê
+    padrao_codigo: float   # o valor de .env/código, p/ o botão "restaurar"
+    minimo: float
+    maximo: float
+    passo: float
+
+
+class ParametrosResponse(BaseModel):
+    parametros: list[ParametroInfo]
+    # Retrato de como o universo está classificado AGORA, para o painel poder
+    # mostrar o efeito de uma mudança em vez de só confirmar que ela ocorreu.
+    distribuicao: dict[str, int]
+    total_fundos: int
+    total_sem_classificacao: int
+
+
+class ParametrosUpdate(BaseModel):
+    """Corpo do PUT. Chaves são as de `ParametroInfo.chave`, valores em %."""
+    valores: dict[str, float] = Field(
+        ...,
+        description='Ex.: {"threshold_majoritario": 20}',
+    )
+
+
+class ReclassificacaoResponse(BaseModel):
+    """O que a rotina de reclassificação fez com a base.
+
+    `alteracoes` é o miolo: quantos fundos saíram de cada bucket para cada
+    outro. Um painel que respondesse só "ok" deixaria o usuário sem saber se
+    mexer de 20% para 25% moveu 3 fundos ou 3 mil.
+    """
+    status: str
+    mudancas: dict[str, dict[str, float]] = Field(default_factory=dict)
+    total_fundos: int
+    fundos_reclassificados: int
+    distribuicao_antes: dict[str, int]
+    distribuicao_depois: dict[str, int]
+    # "lf -> misto": 42
+    alteracoes: dict[str, int] = Field(default_factory=dict)
+    duracao_s: float = 0.0

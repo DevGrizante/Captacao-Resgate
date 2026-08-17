@@ -1,11 +1,26 @@
 """
 Ingestão do anexo de captação/resgate que chega por e-mail.
 
-Todo dia útil de manhã chega, na pasta `Quantum` do Outlook, um e-mail de
-`ottavio.lucca@bgcg.com` com assunto "FW: Captação e resgate" e um anexo
-`vinculado_*.xlsx` gerado pelo Quantum Axis. Este módulo acha o e-mail MAIS
-RECENTE que bate com esses critérios, salva o anexo em `data/inbox/` e devolve
-o caminho.
+Todo dia útil de manhã chega, na pasta `Quantum` do Outlook, um e-mail com
+assunto "FW: Captação e resgate" e um anexo `vinculado_*.xlsx` gerado pelo
+Quantum Axis. Este módulo acha o e-mail MAIS RECENTE que bate com esses
+critérios, salva o anexo em `data/inbox/` e devolve o caminho.
+
+>>> QUEM MANDA NÃO IMPORTA — O ASSUNTO IMPORTA
+
+O relatório é encaminhado por mais de uma pessoa da mesa. Enquanto o filtro
+exigia um remetente fixo, um dia em que outra pessoa mandasse o arquivo o app
+não via nada de novo e seguia servindo o anexo da véspera, sem erro nenhum na
+tela — o pior tipo de falha, porque parece que está funcionando.
+
+Por isso o padrão de `OUTLOOK_REMETENTE` é vazio: vale o e-mail mais recente
+com o assunto, venha de quem vier. O assunto casa por SUBSTRING, sem acento e
+sem caixa, então "Captação e resgate" pega tanto o "FW: Captação e resgate"
+encaminhado quanto o original. O remetente escolhido vai para o log, para a
+origem continuar auditável mesmo sem ser critério de seleção.
+
+Preencher `OUTLOOK_REMETENTE` no `.env` volta a restringir, se um dia a pasta
+passar a receber outra coisa com assunto parecido.
 
 O nome do arquivo salvo carrega a data de recebimento
 (`vinculado_AAAAMMDD_HHMM.xlsx`), então:
@@ -136,7 +151,11 @@ def _baixar_do_outlook() -> Path | None:
             try:
                 if assunto_alvo not in _normalizar(mail.Subject):
                     continue
-                if remetente_alvo and remetente_alvo not in _smtp_do_remetente(mail):
+
+                # Só depois do assunto casar: resolver o SMTP é uma chamada COM
+                # a mais por item, e o assunto já descarta a esmagadora maioria.
+                remetente = _smtp_do_remetente(mail)
+                if remetente_alvo and remetente_alvo not in remetente:
                     continue
 
                 recebido: datetime = mail.ReceivedTime
@@ -147,19 +166,31 @@ def _baixar_do_outlook() -> Path | None:
                         f"vinculado_{recebido.strftime('%Y%m%d_%H%M')}.xlsx"
                     )
                     if destino.exists():
-                        logger.info("Anexo de %s já estava na inbox.", recebido)
+                        logger.info(
+                            "Anexo de %s (de %s) já estava na inbox.",
+                            recebido, remetente or "remetente desconhecido",
+                        )
                         return destino
                     anexo.SaveAsFile(str(destino))
-                    logger.info("Anexo salvo: %s", destino.name)
+                    # O remetente entra no log porque deixou de ser critério de
+                    # seleção: é assim que se confere de quem veio o arquivo que
+                    # o dashboard está mostrando.
+                    logger.info(
+                        "Anexo salvo: %s (assunto %r, de %s, recebido em %s).",
+                        destino.name, str(mail.Subject),
+                        remetente or "remetente desconhecido", recebido,
+                    )
                     return destino
             except Exception as e:  # noqa: BLE001 — um item ruim não pode parar a varredura
                 logger.debug("Item ignorado na varredura do Outlook: %s", e)
                 continue
 
         logger.warning(
-            "Nenhum e-mail de '%s' com assunto '%s' e anexo .xlsx nos %d itens "
-            "mais recentes de '%s'.",
-            settings.OUTLOOK_REMETENTE, settings.OUTLOOK_ASSUNTO,
+            "Nenhum e-mail com assunto contendo '%s'%s e anexo .xlsx nos %d "
+            "itens mais recentes da pasta '%s'.",
+            settings.OUTLOOK_ASSUNTO,
+            f" de '{settings.OUTLOOK_REMETENTE}'" if remetente_alvo else
+            " (qualquer remetente)",
             settings.OUTLOOK_MAX_ITENS, settings.OUTLOOK_PASTA,
         )
         return None

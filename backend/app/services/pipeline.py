@@ -43,7 +43,7 @@ from app.models.schemas import (
     StressFundo,
 )
 from app.services import credito_privado, perfil_indexador
-from app.services.classifier import classificar_dict
+from app.services.classifier import classificar, nome_incentivado
 
 logger = logging.getLogger("pipeline")
 
@@ -146,6 +146,7 @@ class Pipeline:
             # Mede exposição do cotista (benchmark / comportamento da cota),
             # não composição da carteira. Ver services/perfil_indexador.py.
             perfil, origem, detalhe = perfil_indexador.avaliar(c)
+            bucket, bucket_motivo = _bucket_de(c)
             fundos.append(Fundo(
                 perfil_indexador=perfil,
                 perfil_indexador_origem=origem,
@@ -158,7 +159,9 @@ class Pipeline:
                 forma_condominio=c.get("forma_condominio"),
                 cvm_situacao=c.get("cvm_situacao"),
                 pl_data=c.get("pl_data"),
-                bucket=_bucket_de(c),
+                bucket=bucket,
+                bucket_motivo=bucket_motivo,
+                nome_incentivado=nome_incentivado(c.get("nome")),
                 diaria=_f(c.get("diaria")),
                 semanal=_f(c.get("semanal")),
                 mensal=_f(c.get("mensal")),
@@ -181,6 +184,8 @@ class Pipeline:
                 carteira_pct_pl=_opt_f(c.get("carteira_pct_pl")),
                 carteira_idx_conhecido_pct=_opt_f(c.get("carteira_idx_conhecido_pct")),
                 carteira_sigilo_pct=_opt_f(c.get("carteira_sigilo_pct")),
+                dap_nocional=_opt_f(c.get("dap_nocional")),
+                dap_cobertura=_opt_f(c.get("dap_cobertura")),
                 carteira_data=c.get("carteira_data"),
                 carteira_motivo=c.get("carteira_motivo"),
                 historico_semanal=c.get("historico_semanal") or {},
@@ -220,6 +225,70 @@ class Pipeline:
 
     def refresh(self) -> None:
         self._construir()
+
+    # ---------- reclassificação (painel de controle) ----------
+    def reclassificar(self) -> dict:
+        """Reaplica a regra de classificação sobre a base já carregada.
+
+        É o que o painel dispara quando alguém muda o corte percentual. NÃO
+        rebaixa nada da CVM nem revarre o Outlook: a composição da carteira, o
+        nome e a cobertura de DAP já estão em memória, e são exatamente os três
+        insumos da regra. Refazer a carga custaria minutos e mudaria variáveis
+        que o usuário não pediu para mudar — a resposta ao painel ficaria
+        contaminada por um CDA novo que chegou no meio do caminho.
+
+        Efeito colateral necessário: `self._caches` é limpo. Ele guarda as
+        agregações por (janela, indexador, abertos), e todas elas são derivadas
+        do bucket — mantê-las serviria ranking antigo com classificação nova.
+
+        Devolve o antes/depois e as transições, para o painel mostrar o que a
+        mudança de fato fez com a base.
+        """
+        inicio = time.time()
+        self._garantir()
+
+        antes = _distribuicao(self._fundos)
+        transicoes: dict[str, int] = defaultdict(int)
+        alterados = 0
+
+        for f in self._fundos:
+            anterior = f.bucket
+            novo, motivo = _classificar(
+                f.pct_lf, f.pct_ipca, f.pct_cdi, f.nome, f.dap_cobertura,
+            )
+            f.bucket = novo
+            f.bucket_motivo = motivo
+            if novo != anterior:
+                alterados += 1
+                transicoes[f"{_rotulo(anterior)} -> {_rotulo(novo)}"] += 1
+
+        self._caches.clear()
+        depois = _distribuicao(self._fundos)
+        duracao = time.time() - inicio
+        logger.info(
+            "Reclassificação: %d de %d fundos mudaram de bucket em %.2fs. %s",
+            alterados, len(self._fundos), duracao, dict(transicoes) or "nenhuma transição",
+        )
+        return {
+            "total_fundos": len(self._fundos),
+            "fundos_reclassificados": alterados,
+            "distribuicao_antes": antes,
+            "distribuicao_depois": depois,
+            # As transições maiores primeiro: é a leitura que o usuário faz.
+            "alteracoes": dict(
+                sorted(transicoes.items(), key=lambda kv: kv[1], reverse=True)
+            ),
+            "duracao_s": round(duracao, 3),
+        }
+
+    def distribuicao(self) -> dict[str, int]:
+        """Quantos fundos há em cada bucket agora — o painel abre mostrando isto."""
+        self._garantir()
+        return _distribuicao(self._fundos)
+
+    def total_fundos(self) -> int:
+        self._garantir()
+        return len(self._fundos)
 
     # ---------- agregações ----------
     def _agregar(self, fundos: list[Fundo], janela: str) -> dict:
@@ -384,8 +453,8 @@ class Pipeline:
                 rotulo=j["rotulo"],
                 curto=j["curto"],
                 total=total,
-                ipca=por_bucket[Bucket.IPCA] if algum_classificado else None,
-                cdi=por_bucket[Bucket.CDI] if algum_classificado else None,
+                incentivada=por_bucket[Bucket.INCENTIVADA] if algum_classificado else None,
+                tradicional=por_bucket[Bucket.TRADICIONAL] if algum_classificado else None,
                 lf=por_bucket[Bucket.LF] if algum_classificado else None,
                 misto=por_bucket[Bucket.MISTO] if algum_classificado else None,
             ))
@@ -448,8 +517,7 @@ class Pipeline:
             if abertos:
                 fs = [f for f in fs if f.aberto_captacao is not False]
             if indexador != "todos":
-                b_map = {"ipca": Bucket.IPCA, "cdi": Bucket.CDI,
-                         "lf": Bucket.LF, "misto": Bucket.MISTO}
+                b_map = {b.value: b for b in Bucket}
                 if indexador in b_map:
                     fs = [f for f in fs if f.bucket == b_map[indexador]]
             self._caches[key] = self._agregar(fs, janela)
@@ -472,7 +540,7 @@ class Pipeline:
             reverse=True,
         )
 
-        mixes = [("IPCA+", g.mix_ipca), ("CDI+", g.mix_cdi),
+        mixes = [("Incentivada", g.mix_incentivada), ("Tradicional", g.mix_tradicional),
                  ("LF", g.mix_lf), ("Misto", g.mix_misto)]
         classe = None
         if any(v is not None for _, v in mixes):
@@ -484,32 +552,23 @@ class Pipeline:
             sum(f.historico_semanal.get(j["chave"], 0.0) for f in fundos)
             for j in ultimas
         ]
-        sparkline_cdi = [
-            sum(f.historico_semanal.get(j["chave"], 0.0) for f in fundos if f.bucket == "cdi")
-            for j in ultimas
-        ]
-        sparkline_ipca = [
-            sum(f.historico_semanal.get(j["chave"], 0.0) for f in fundos if f.bucket == "ipca")
-            for j in ultimas
-        ]
-        sparkline_lf = [
-            sum(f.historico_semanal.get(j["chave"], 0.0) for f in fundos if f.bucket == "lf")
-            for j in ultimas
-        ]
-        sparkline_misto = [
-            sum(f.historico_semanal.get(j["chave"], 0.0) for f in fundos if f.bucket == "misto")
-            for j in ultimas
-        ]
+
+        def _spark(bucket: Bucket) -> list[float]:
+            return [
+                sum(f.historico_semanal.get(j["chave"], 0.0)
+                    for f in fundos if f.bucket == bucket)
+                for j in ultimas
+            ]
 
         return DossieResponse(
             gestora=g,
             classe_majoritaria=classe,
             sparkline=sparkline,
             sparkline_labels=[j["curto"] for j in ultimas],
-            sparkline_cdi=sparkline_cdi,
-            sparkline_ipca=sparkline_ipca,
-            sparkline_lf=sparkline_lf,
-            sparkline_misto=sparkline_misto,
+            sparkline_incentivada=_spark(Bucket.INCENTIVADA),
+            sparkline_tradicional=_spark(Bucket.TRADICIONAL),
+            sparkline_lf=_spark(Bucket.LF),
+            sparkline_misto=_spark(Bucket.MISTO),
             fundos=fundos[:50],
         )
 
@@ -587,15 +646,56 @@ def _janela_g(g: GestoraResumo, janela: str) -> float:
     return float(getattr(g, janela, 0.0) or 0.0)
 
 
-def _bucket_de(cru: dict) -> Bucket | None:
+SEM_CLASSIFICACAO = "sem_classificacao"
+
+
+def _rotulo(bucket: Bucket | None) -> str:
+    return bucket.value if bucket is not None else SEM_CLASSIFICACAO
+
+
+def _distribuicao(fundos: list[Fundo]) -> dict[str, int]:
+    """Contagem por bucket, com todas as chaves sempre presentes.
+
+    Bucket vazio aparece como 0 em vez de sumir: o painel compara antes/depois,
+    e uma chave que desaparece do dicionário viraria "—" na tela em vez do
+    "esvaziou" que de fato aconteceu.
+    """
+    contagem = {b.value: 0 for b in Bucket}
+    contagem[SEM_CLASSIFICACAO] = 0
+    for f in fundos:
+        contagem[_rotulo(f.bucket)] += 1
+    return contagem
+
+
+def _classificar(
+    pct_lf, pct_ipca, pct_cdi, nome, dap_cobertura,
+) -> tuple[Bucket | None, str | None]:
     """Classifica só quando há composição; sem ela, o fundo fica sem bucket.
 
     Cair em MISTO por falta de dado seria mentira: MISTO significa "olhamos a
     carteira e nenhum indexador é majoritário", não "não olhamos".
+
+    Ponto único de entrada da classificação no pipeline: a construção inicial e
+    a reclassificação disparada pelo painel passam pelos dois lados daqui, e
+    precisam continuar concordando quando a regra mudar.
     """
-    if all(cru.get(k) is None for k in ("pct_lf", "pct_ipca", "pct_cdi")):
-        return None
-    return classificar_dict(cru)
+    if pct_lf is None and pct_ipca is None and pct_cdi is None:
+        return None, None
+    return classificar(
+        pct_lf=float(pct_lf or 0.0),
+        pct_ipca=float(pct_ipca or 0.0),
+        pct_cdi=float(pct_cdi or 0.0),
+        nome=nome or "",
+        dap_cobertura=dap_cobertura,
+    )
+
+
+def _bucket_de(cru: dict) -> tuple[Bucket | None, str | None]:
+    """Versão para o dict cru vindo dos conectores."""
+    return _classificar(
+        cru.get("pct_lf"), cru.get("pct_ipca"), cru.get("pct_cdi"),
+        cru.get("nome"), cru.get("dap_cobertura"),
+    )
 
 
 def _cobertura_pl(crus: list[dict], stats: dict) -> dict:
@@ -726,8 +826,9 @@ def _perfil_gestora(fundos: list[Fundo]) -> dict:
 
 
 def _mix(classificados: list[Fundo]) -> dict:
-    """Mix por indexador, em fração do PL. Sem PL ou sem classificação, None."""
-    vazio = {"mix_ipca": None, "mix_cdi": None, "mix_lf": None, "mix_misto": None}
+    """Mix por classificação, em fração do PL. Sem PL ou sem bucket, None."""
+    vazio = {"mix_incentivada": None, "mix_tradicional": None,
+             "mix_lf": None, "mix_misto": None}
     if not classificados:
         return vazio
     pl_total = _soma_opt(f.pl for f in classificados)
@@ -737,8 +838,8 @@ def _mix(classificados: list[Fundo]) -> dict:
     for f in classificados:
         acc[f.bucket] += f.pl or 0.0
     return {
-        "mix_ipca": acc[Bucket.IPCA] / pl_total,
-        "mix_cdi": acc[Bucket.CDI] / pl_total,
+        "mix_incentivada": acc[Bucket.INCENTIVADA] / pl_total,
+        "mix_tradicional": acc[Bucket.TRADICIONAL] / pl_total,
         "mix_lf": acc[Bucket.LF] / pl_total,
         "mix_misto": acc[Bucket.MISTO] / pl_total,
     }

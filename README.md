@@ -20,7 +20,7 @@ casar o **CNPJ do fundo** com bases abertas da CVM e do SND:
 | `PERFIL_MENSAL` | % em crédito privado, prazo da carteira, concentração, perfil de cotistas | ~83% |
 | `EXTRATO` | taxa de adm., cotização, aplicação mínima, público-alvo | ~69% |
 | `registro_fundo_classe` | gestor, administrador, classificação ANBIMA | ~92% |
-| `CDA` + SND | **composição da carteira → bucket IPCA+/CDI+/LF/Misto**, mix por papel | ~65% |
+| `CDA` + SND | **composição da carteira e hedge em DAP → classificação LF / Incentivada / Tradicional / Misto**, mix por papel | ~65% |
 | `LAMINA` | índice de referência declarado | ~2% |
 
 Cada campo carrega a sua cobertura até a tela: o aviso do topo diz em quantos
@@ -52,14 +52,28 @@ que chega todo dia útil de manhã:
 | | |
 |---|---|
 | Pasta no Outlook | `Quantum` |
-| Remetente | `ottavio.lucca@bgcg.com` |
 | Assunto | `FW: Captação e resgate` |
+| Remetente | **qualquer um** |
 | Anexo | `vinculado_<timestamp>.xlsx` (~1 MB) |
 
-O app lê **sempre o e-mail mais recente** que casa com esses três critérios. Não
-há passo manual: `POST /api/admin/refresh` (ou o vencimento do cache) re-varre a
+O app lê **sempre o e-mail mais recente** que casa com esses critérios. Não há
+passo manual: `POST /api/admin/refresh` (ou o vencimento do cache) re-varre a
 pasta, salva o anexo em `data/inbox/vinculado_AAAAMMDD_HHMM.xlsx` e recarrega.
 Anexo já baixado não é baixado de novo, e o histórico fica todo em `data/inbox/`.
+
+> **Quem manda não é critério, e isso é deliberado.** O relatório é encaminhado
+> por mais de uma pessoa da mesa. Enquanto o filtro exigia um remetente fixo,
+> um dia em que outra pessoa mandasse o arquivo o app não via nada de novo e
+> seguia servindo o anexo da véspera — **sem erro nenhum na tela**, que é o pior
+> tipo de falha. Foi exatamente o que aconteceu em 17/08/2026: o e-mail das
+> 07:42 do remetente antigo trazia um export sem a coluna `CNPJ`, e o das 11:22
+> de outra pessoa (com CNPJ) ficava invisível. Sem CNPJ não há casamento com a
+> CVM, e o dashboard subia com **todos os fundos sem classificação**.
+>
+> O assunto casa por substring, sem acento e sem caixa, então pega tanto o
+> `FW:` encaminhado quanto o original. O remetente do e-mail escolhido vai para
+> o log, para a origem seguir auditável. `OUTLOOK_REMETENTE` no `.env` volta a
+> restringir, se um dia a pasta passar a receber outra coisa parecida.
 
 ### O que a planilha traz
 
@@ -183,7 +197,7 @@ inferido, e a inferência leva "?" no rótulo.
 `PERFIL_INDEXADOR_INFERIR=false` no `.env` desliga a rota 2 e deixa só o
 declarado.
 
-### O bucket IPCA+ / CDI+ / LF / Misto — sem o Quantum
+### A classificacao LF / Incentivada / Tradicional / Misto — sem o Quantum
 
 Sai do **CDA** da CVM (a carteira que o fundo declara) cruzado com o **registro
 de debêntures do SND**. Cobre **2.897 fundos (65%)**, R$ 2,79 tri de PL.
@@ -267,7 +281,34 @@ fundo sem composição fica **sem bucket**, e não "Misto" — *Misto* significa
 
 ## Como rodar (Windows)
 
-### 1. Backend (API)
+### Caminho normal: duplo clique em `Iniciar.bat`
+
+A única exigência é **Python 3.10+ instalado**. O `Iniciar.bat` cuida do resto:
+acha o interpretador (inclusive via `py -3`, e rejeitando o atalho da Microsoft
+Store, que não executa nada), cria o ambiente virtual, instala as dependências,
+copia o `.env` do exemplo, escolhe as portas, sobe API e front, espera a API
+responder e abre o navegador.
+
+| | |
+|---|---|
+| Dashboard | `http://localhost:5500` |
+| Painel de controle | `http://localhost:5500/admin.html` |
+| API / docs | `http://localhost:8000/docs` |
+
+O `pip install` só roda quando o `requirements.txt` muda: o script guarda uma
+cópia dele dentro do venv e compara. Cliques seguintes sobem em segundos.
+
+**Rodando junto com o `cvm-monitor-pro`:** os dois convivem. As portas padrão
+não se cruzam (aqui 8000/5500, lá 8080), cada projeto tem o seu próprio venv
+dentro da própria pasta, e se alguma porta estiver ocupada o script anda para a
+próxima livre em vez de subir por cima de um servidor alheio. Quando a porta da
+API muda, o script reescreve `frontend/js/config.js` e ajusta o `CORS_ORIGINS`
+do backend, então as duas pontas continuam se enxergando.
+
+### Caminho manual
+
+<details>
+<summary>Se preferir subir na mão</summary>
 
 ```bat
 cd backend
@@ -299,11 +340,44 @@ cd frontend
 python -m http.server 5500
 ```
 
-Abra `http://localhost:5500`. Se o backend estiver em outra porta, edite
-`API_BASE` no topo de `frontend/js/api.js` (ou defina `window.API_BASE` antes
-de carregar o script).
+Abra `http://localhost:5500`. Se o backend estiver em outra porta, ajuste
+`window.API_BASE` em `frontend/js/config.js` (é o arquivo que o `Iniciar.bat`
+gera; sem ele, `js/api.js` cai no padrão `http://localhost:8000`).
 
-> Atalho: dê duplo clique em `Iniciar.bat` na raiz — ele sobe API e front juntos.
+</details>
+
+## Painel de controle
+
+`http://localhost:5500/admin.html`, ou o botão **⚙ Painel** no cabeçalho.
+
+Ele expõe os parâmetros que governam a classificação e, **no mesmo gesto**,
+reclassifica a base inteira:
+
+| Parâmetro | O que governa | Padrão |
+|---|---|---|
+| Corte de classificação | fatia mínima para uma classe ser majoritária: acima dele em LF o fundo é LF, abaixo ele vai para a dupla verificação Incentivada/Tradicional | 20% |
+| Cobertura mínima de hedge em DAP | nocional em DAP sobre o R$ da carteira IPCA+ a partir do qual entendemos que o fundo travou o cupom de inflação | 20% |
+
+Salvar dispara a reclassificação e a resposta traz **quantos fundos mudaram de
+bucket e para onde foram**, não um "ok". Uma régua de negócio ajustada às cegas
+vira tentativa e erro: sem ver o efeito, o usuário mexe no número, vai olhar o
+dashboard, volta e mexe de novo. Reclassificar 4.477 fundos leva ~0,03s.
+
+> **A reclassificação não rebaixa nada da CVM.** A composição da carteira, o
+> nome e a cobertura de DAP — os três insumos da regra — já estão em memória.
+> Refazer a carga levaria minutos e traria variáveis que ninguém pediu para
+> mudar, tornando impossível dizer se o antes/depois veio do parâmetro ou de um
+> CDA novo que chegou no meio. Para recarregar a fonte existe
+> `POST /api/admin/refresh`, que é outra operação.
+
+O que o painel grava vai para `data/parametros.json` e passa a valer sobre o
+`.env` no próximo start. É estado local da máquina (fora do git); o valor que o
+projeto entrega continua em `backend/.env.example`.
+
+> **Sem autenticação**, pelo mesmo motivo que o resto da API: isto roda em
+> localhost, na máquina do analista, com CORS restrito à origem do front. Se um
+> dia subir para servidor compartilhado, `routers/admin.py` é o primeiro a
+> ganhar autenticação — ele escreve em disco e muda o que todo mundo vê.
 
 ## Fontes alternativas
 
@@ -375,34 +449,75 @@ A ponte por CNPJ já está pronta — a planilha traz `CNPJ` (do fundo) e
 `CNPJ Gestão` desde 14/08/2026, e o `CVMCadastroEnricher` roda no mesmo ponto
 do pipeline onde o `QuantumEnricher` vai entrar.
 
-## Regra de classificação por indexador
+## Regra de classificação: LF / Incentivada / Tradicional / Misto
 
-Hierárquica, aplicada em `services/classifier.py`:
+Hierárquica, aplicada em `services/classifier.py`. O corte é `THRESHOLD_MAJORITARIO`,
+hoje **20%** — e é editável em tempo de execução pelo [painel de controle](#painel-de-controle).
 
-1. `> 50%` em **Letras Financeiras** → **LF**
-2. senão, `> 50%` do restante (ex-LF) em ativos **IPCA+** → **IPCA**
-3. senão, `> 50%` do restante (ex-LF) em ativos **CDI+/DI+** → **CDI**
-4. senão → **Misto**
+1. `>` corte em **Letras Financeiras** → **LF**.
+   Papel bancário; o fundo sai da conta de crédito corporativo antes de tudo.
+2. Senão é fundo de crédito, e vem a **dupla verificação**:
+   * **Incentivada** — o nome traz `Incentivada`/`Incentivado`
+     **E** a carteira opera IPCA+ de verdade: mais que o corte da base ex-LF em
+     papel indexado a IPCA **e** hedge do cupom no futuro de **DAP**.
+   * **Tradicional** — o nome **não** traz essas palavras
+     **E** a carteira está atrelada a CDI+. Entra aqui também quem compra IPCA+
+     e trava tudo em DAP: na ponta do cotista isso é CDI+.
+3. Senão → **Misto**, com o motivo registrado em `bucket_motivo`.
 
 LF é tratada como instrumento (não indexador): sai da conta primeiro; só então
-mede-se IPCA vs CDI sobre a base ex-LF. As frações de entrada são sobre a
+mede-se o indexador sobre a base ex-LF. As frações de entrada são sobre a
 **carteira de crédito** do fundo, não sobre o PL — a pergunta é "deste dinheiro
 em crédito, a que ele é indexado", e caixa em LFT não deve diluir a resposta.
 
-Com os dados de abr/2026 a distribuição fica:
+### Por que o nome sozinho não classifica
 
-| Bucket | Fundos | % do PL |
+O fundo de debênture incentivada compra o papel em **B + spread** (NTN-B de
+referência mais o prêmio de crédito) e **vende cupom de IPCA no futuro de DAP**.
+O que sobra na cota é só o spread de crédito: a perna de inflação foi travada.
+Um fundo que compra o mesmo papel e **não** vende DAP está com outra tese — está
+comprado em juro real, e o cotista carrega a marcação da NTN-B junto.
+
+São produtos diferentes para a mesa, e a diferença não aparece no nome. Medido
+sobre o CDA de abr/2026 (4.477 fundos do universo, 2.894 com carteira legível):
+
+| | Fundos |
+|---|---|
+| Nome traz `Incentivad*` | 154 |
+| …e a carteira confirma IPCA+ **com** hedge em DAP → **Incentivada** | 80 |
+| …e a carteira é IPCA+ **sem** hedge em DAP → **Misto** | 55 |
+| …e a carteira é dominada por LF → **LF** | 2 |
+| …sem carteira legível → sem classificação | 17 |
+
+Ou seja: **mais de um terço dos fundos que se chamam "incentivada" não operam o
+comportamento de IPCA+** descrito acima. Sem a segunda verificação eles seriam
+vendidos como a mesma coisa. O sinal vem do bloco de derivativos do próprio CDA
+(`Futuro de DAP:Cupom de DI x IPCA`, no BLC_8), e a régua é a cobertura —
+nocional em DAP sobre o R$ em papel IPCA+. Entre os fundos com posição em DAP a
+cobertura tem **mediana 0,65**; o piso de `HEDGE_DAP_MINIMO` (20%) descarta a
+posição residual que não trava carteira nenhuma.
+
+O nocional do DAP é **reconstruído**, não lido: o CDA informa contratos e ajuste
+a mercado, nunca o tamanho da posição. Ver `_posicao_dap` em
+`connectors/cvm_carteira.py`, que documenta a aproximação e o seu limite.
+
+### Distribuição medida (carteira de abr/2026)
+
+| Bucket | Fundos | % do PL classificado |
 |---|---|---|
-| LF | 742 | 50,8% |
-| CDI+ | 782 | 29,0% |
-| IPCA+ | 1.358 | 8,5% |
-| Misto | 15 | 0,1% |
+| LF | 1.181 | 79,4% |
+| Tradicional | 930 | 13,7% |
+| Misto | 703 | 4,6% |
+| Incentivada | 80 | 2,2% |
+| *sem classificação* | 1.583 | — |
 
-IPCA+ é o bucket mais numeroso e o menor em PL: são muitos fundos de debênture
-incentivada, todos pequenos. E **Misto quase não existe** (0,4% dos fundos)
-porque a dominância é real — a mediana do maior indexador é 98,3% da carteira, e
-o p10 ainda é 82%. Subir `THRESHOLD_MAJORITARIO` para 0,8 levaria Misto a 7%; o
-limiar de 0,5 é o que estava validado com o negócio e ficou como está.
+**Incentivada é o menor bucket em PL e não é acidente**: são fundos de debênture
+incentivada, todos pequenos, e o corte de 20% para LF joga muita carteira mista
+com papel bancário para o bucket LF antes de a pergunta do indexador ser feita.
+Misto cresceu em relação à regra anterior — 703 fundos contra 15 — porque agora
+ele carrega os casos em que **nome e carteira discordam**, que antes eram
+classificados só pelo indexador dominante. Isso é o efeito pretendido: são
+exatamente os fundos que exigem um olhar antes de virarem argumento de venda.
 
 Além do bucket, a carteira também responde **em que papel a casa entra**
 (debênture / LF / CDB / CRI-CRA). É outro eixo: uma casa de LF é cliente de um
@@ -482,5 +597,9 @@ Cada fundo da lista mostra o bucket com a carteira que o gerou no *tooltip*
 | GET | `/api/movers?direcao=pos\|neg` | Gestoras por variação de PL em 30d (ou por fluxo, sem PL) |
 | GET | `/api/stress?limite=N` | Fundos com resgate anormal |
 | GET | `/api/fonte` | Arquivo em uso e campos indisponíveis |
-| POST | `/api/admin/refresh` | Re-varre o Outlook e recalcula o pipeline |
+| POST | `/api/admin/refresh` | Re-varre o Outlook e recalcula o pipeline (recarrega a fonte) |
+| GET | `/api/admin/parametros` | Parametros editaveis e o retrato atual da classificacao |
+| PUT | `/api/admin/parametros` | Grava os parametros **e reclassifica a base**, devolvendo as transicoes |
+| POST | `/api/admin/parametros/restaurar` | Volta aos valores de `.env` e reclassifica |
+| POST | `/api/admin/reclassificar` | Reaplica a regra sem mexer em parametro |
 | GET | `/health` | Status, fonte ativa e último arquivo baixado |

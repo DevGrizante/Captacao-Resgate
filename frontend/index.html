@@ -20,6 +20,8 @@
       </div>
     </div>
     <div class="flex items-center gap-2">
+      <a href="admin.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700"
+         title="Painel de controle: parâmetros de classificação">⚙ Painel</a>
       <button class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">Exportar PDF</button>
       <button class="pill px-3 py-1.5 text-xs rounded-md bg-blue-600 hover:bg-blue-500">Compartilhar link</button>
     </div>
@@ -47,13 +49,17 @@
       </div>
       <div class="w-px h-16 bg-slate-800"></div>
       <div>
-        <span class="text-xs text-slate-500 uppercase tracking-wide">Indexador</span>
+        <span class="text-xs text-slate-500 uppercase tracking-wide">Classificação</span>
         <div class="flex gap-1 mt-1.5" id="idx-tabs">
           <button data-i="todos" class="pill px-3 py-1 text-xs rounded pill-active">Todos</button>
-          <button data-i="ipca" class="pill px-3 py-1 text-xs rounded bg-slate-800">IPCA+</button>
-          <button data-i="cdi" class="pill px-3 py-1 text-xs rounded bg-slate-800">CDI+</button>
-          <button data-i="lf" class="pill px-3 py-1 text-xs rounded bg-slate-800">LF</button>
-          <button data-i="misto" class="pill px-3 py-1 text-xs rounded bg-slate-800">Misto</button>
+          <button data-i="incentivada" class="pill px-3 py-1 text-xs rounded bg-slate-800"
+                  title="Nome traz &quot;Incentivada/o&quot; E a carteira opera IPCA+ de fato: compra em B + spread com hedge do cupom em DAP.">Incentivada</button>
+          <button data-i="tradicional" class="pill px-3 py-1 text-xs rounded bg-slate-800"
+                  title="Sem &quot;Incentivada/o&quot; no nome E carteira atrelada a CDI+ (inclui IPCA+ integralmente travado em DAP).">Tradicional</button>
+          <button data-i="lf" class="pill px-3 py-1 text-xs rounded bg-slate-800"
+                  title="Letras Financeiras acima do corte de classificação — papel bancário, não crédito corporativo.">LF</button>
+          <button data-i="misto" class="pill px-3 py-1 text-xs rounded bg-slate-800"
+                  title="Olhamos a carteira e ela não confirma nenhuma das regras acima.">Misto</button>
         </div>
 
       </div>
@@ -328,7 +334,8 @@
   </div>
 </aside>
 
-<script src="js/api.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<script src="js/config.js?v=7"></script>
+<script src="js/api.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>

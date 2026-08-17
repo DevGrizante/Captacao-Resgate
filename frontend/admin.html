@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel de controle · Captação</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="min-h-screen">
+
+<header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-40">
+  <div class="max-w-[1100px] mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center font-bold">⚙</div>
+      <div>
+        <h1 class="text-sm font-semibold">Painel de controle</h1>
+        <p class="text-xs text-slate-500" id="hdr-meta">Carregando…</p>
+      </div>
+    </div>
+    <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Voltar ao dashboard</a>
+  </div>
+</header>
+
+<main class="max-w-[1100px] mx-auto px-6 py-6 space-y-6">
+
+  <!-- Erro de conexão com a API, se houver -->
+  <div id="erro-api" class="hidden bg-red-950 border border-red-900 text-red-300 text-sm rounded-lg p-4"></div>
+
+  <!-- Como a base está classificada agora -->
+  <section class="card rounded-lg p-4">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <h2 class="text-sm font-semibold">Classificação atual da base</h2>
+      <span class="text-xs text-slate-500" id="dist-meta">—</span>
+    </div>
+    <div class="flex h-3 w-full rounded overflow-hidden bg-slate-800" id="dist-bar"></div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3 text-center" id="dist-legend"></div>
+  </section>
+
+  <!-- Parâmetros -->
+  <section class="card rounded-lg p-4">
+    <div class="mb-1">
+      <h2 class="text-sm font-semibold">Parâmetros de classificação</h2>
+      <p class="text-[11px] text-slate-500 mt-1">
+        Alterar um parâmetro e salvar dispara a reclassificação de toda a base já carregada.
+        A composição da carteira, o nome e a posição em DAP não são baixados de novo — são os
+        mesmos dados, com a régua nova.
+      </p>
+    </div>
+
+    <form id="form-parametros" class="space-y-5 mt-4"></form>
+
+    <div class="flex items-center gap-3 mt-5 pt-4 border-t border-slate-800 flex-wrap">
+      <button type="button" id="btn-salvar"
+        class="pill px-4 py-2 text-xs rounded-md bg-blue-600 hover:bg-blue-500 font-medium">
+        Salvar e reclassificar
+      </button>
+      <button type="button" id="btn-restaurar"
+        class="pill px-3 py-2 text-xs rounded-md bg-slate-800 hover:bg-slate-700">
+        Restaurar padrão
+      </button>
+      <button type="button" id="btn-reclassificar"
+        class="pill px-3 py-2 text-xs rounded-md bg-slate-800 hover:bg-slate-700"
+        title="Reaplica a regra sem mexer em parâmetro — útil depois de recarregar a fonte.">
+        Só reclassificar
+      </button>
+      <span class="text-[11px] text-slate-600 ml-auto" id="status-form"></span>
+    </div>
+  </section>
+
+  <!-- Resultado da última operação -->
+  <section class="card rounded-lg p-4 hidden" id="resultado">
+    <h2 class="text-sm font-semibold mb-3">O que a reclassificação fez</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="res-kpis"></div>
+    <div class="mt-4 hidden" id="res-transicoes-box">
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Para onde os fundos foram</p>
+      <div class="max-h-64 overflow-y-auto scrollbar">
+        <table class="w-full text-xs">
+          <thead><tr class="text-left text-slate-500">
+            <th class="px-3 py-1.5 font-medium">Transição</th>
+            <th class="px-3 py-1.5 font-medium text-right">Fundos</th>
+          </tr></thead>
+          <tbody id="res-transicoes"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Como a regra funciona -->
+  <section class="card rounded-lg p-4">
+    <h2 class="text-sm font-semibold mb-3">A regra que estes parâmetros governam</h2>
+    <ol class="text-xs text-slate-400 space-y-2 list-decimal list-inside">
+      <li>
+        <strong class="text-amber-400">LF</strong> — Letras Financeiras acima do corte de classificação.
+        É papel bancário, e o fundo sai da conta de crédito corporativo antes de qualquer outra pergunta.
+      </li>
+      <li>
+        <strong class="text-purple-400">Incentivada</strong> — dupla verificação, e as duas precisam bater:
+        o nome do fundo traz “Incentivada” ou “Incentivado”, <em>e</em> a carteira opera IPCA+ de verdade —
+        compra o papel em B + spread e vende cupom de inflação no futuro de DAP, ficando só com o
+        spread de crédito.
+      </li>
+      <li>
+        <strong class="text-blue-400">Tradicional</strong> — o nome não traz essas palavras
+        <em>e</em> a carteira está atrelada a CDI+. Entra aqui também quem compra IPCA+ e trava tudo em DAP:
+        na ponta do cotista isso é CDI+.
+      </li>
+      <li>
+        <strong class="text-slate-300">Misto</strong> — olhamos a carteira e ela não confirma nenhuma das
+        regras acima. É diferente de <em>sem classificação</em>, que significa que não conseguimos olhar
+        (sigilo alto, indexador desconhecido ou pouco crédito perto do PL).
+      </li>
+    </ol>
+  </section>
+
+  <footer class="text-xs text-slate-600 text-center py-4 border-t border-slate-800/50" id="rodape">
+    Captação e Resgate · Crédito Privado
+  </footer>
+</main>
+
+<script src="js/config.js?v=7"></script>
+<script src="js/api.js?v=7"></script>
+<script src="js/admin.js?v=7"></script>
+</body>
+</html>
