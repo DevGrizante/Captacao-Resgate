@@ -30,6 +30,15 @@ const API = {
   movers: (direcao, limite, s) => apiGet(`/api/movers?direcao=${direcao}&limite=${limite}&janela=${s.janela}&indexador=${s.indexador}&abertos=${s.abertos}`),
   stress: (limite, s) => apiGet(`/api/stress?limite=${limite}&janela=${s.janela}&indexador=${s.indexador}&abertos=${s.abertos}`),
 
+  // --- mesa Tesouraria x Asset ---
+  tesourarias: (limite = 60) => apiGet(`/api/tesourarias?limite=${limite}`),
+  tesouraria: (raiz, limite = 40) => apiGet(`/api/tesourarias/${encodeURIComponent(raiz)}?limite=${limite}`),
+
+  // --- carteira de papel bancario, por fundo ---
+  carteiraBancaria: (limite = 300, busca = "") =>
+    apiGet(`/api/carteira-bancaria?limite=${limite}&busca=${encodeURIComponent(busca)}`),
+  carteiraBancariaGestora: (gestora) => apiGet(`/api/carteira-bancaria/${encodeURIComponent(gestora)}`),
+
   // --- painel de controle ---
   parametros: () => apiGet("/api/admin/parametros"),
   salvarParametros: (valores) => apiSend("PUT", "/api/admin/parametros", { valores }),

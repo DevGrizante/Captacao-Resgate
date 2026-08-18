@@ -102,6 +102,17 @@ class Settings:
     CDA_IDX_MINIMO_PCT: float = float(os.getenv("CDA_IDX_MINIMO_PCT", "80"))
     CDA_SIGILO_MAXIMO_PCT: float = float(os.getenv("CDA_SIGILO_MAXIMO_PCT", "20"))
     CDA_CREDITO_MINIMO_PCT: float = float(os.getenv("CDA_CREDITO_MINIMO_PCT", "10"))
+    # --- Papel bancário: papel já vencido não é negócio ---
+    # O CDA é uma foto com 4 meses de defasagem, então ele lista papel que
+    # estava vivo na data-base e já venceu quando a tela é aberta. Medido em
+    # 18/08/2026 sobre o CDA de 2026-04: R$ 103,1 bi em 8.775 posições, 12,2%
+    # do estoque, com vencimento entre maio e julho. Para uma mesa que negocia
+    # rolagem isso é ruído puro — não há o que rolar num papel que já liquidou.
+    # O mês corrente FICA: ele ainda tem vencimentos por acontecer.
+    CDA_EXCLUIR_VENCIDOS: bool = (
+        os.getenv("CDA_EXCLUIR_VENCIDOS", "true").lower() == "true"
+    )
+
     # Registro de debêntures do SND: dá o indexador de 99,4% do valor do BLC_4.
     SND_TTL_HORAS: int = int(os.getenv("SND_TTL_HORAS", "168"))
 
@@ -146,10 +157,14 @@ class Settings:
     # Face do contrato futuro de DAP na B3. O CDA informa a quantidade de
     # contratos e o ajuste a mercado, nunca o nocional — ele é reconstruído.
     DAP_NOCIONAL_CONTRATO: float = float(os.getenv("DAP_NOCIONAL_CONTRATO", "100000"))
-    # Com false, o nome "Incentivada/o" + carteira IPCA+ bastam para o bucket
-    # Incentivada, sem exigir a perna de hedge. Ver a nota em classifier.py.
+    # O nome ("Incentivada/o" ou "Infra") mais a carteira IPCA+ bastam para o
+    # bucket Incentivada. Com true, exige-se também a perna de hedge em DAP,
+    # e quem tem o mandato mas carrega juro real na cota cai em Misto —
+    # eram 669 fundos, decisão de negócio de 18/08/2026 foi não separar.
+    # A cobertura de DAP continua medida e visível; ela só deixou de
+    # decidir o bucket. Ver a nota em classifier.py.
     INCENTIVADA_EXIGE_HEDGE_DAP: bool = (
-        os.getenv("INCENTIVADA_EXIGE_HEDGE_DAP", "true").lower() == "true"
+        os.getenv("INCENTIVADA_EXIGE_HEDGE_DAP", "false").lower() == "true"
     )
     # Limiar de resgate semanal (fração do PL) para virar sinal de estresse.
     # Só se aplica quando há PL — hoje, só na fonte "cvm"/"mock".

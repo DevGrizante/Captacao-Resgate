@@ -10,8 +10,8 @@ REGRA HIERÁRQUICA (validada com o negócio)
        spread de crédito indexado à inflação ou ao CDI? A resposta tem DUAS
        verificações, e as duas precisam bater.
 
-       INCENTIVADA  nome traz "Incentivada"/"Incentivado"
-                    E a carteira opera comportamento de IPCA+
+       INCENTIVADA  nome traz "Incentivada"/"Incentivado" ou "Infra"
+                    E a carteira é majoritariamente IPCA+
 
        TRADICIONAL  nome NÃO traz essas palavras
                     E a carteira está atrelada a CDI+
@@ -25,7 +25,17 @@ da conta antes é intencional — LF é instrumento, não indexador, e deixá-la
 denominador faria uma carteira metade LF / metade debênture IPCA+ parecer não
 ter indexador dominante.
 
->>> O QUE É "COMPORTAMENTO DE IPCA+", E POR QUE ELE PRECISA DA PERNA DE HEDGE
+>>> O HEDGE EM DAP DEIXOU DE DECIDIR O BUCKET (18/08/2026)
+
+Por decisão de negócio, nome + carteira IPCA+ bastam para Incentivada. A
+cobertura de DAP continua medida, guardada e visível no dossiê — ela só não
+separa mais os dois produtos. Eram 669 fundos com mandato de infra que
+carregam juro real na cota e caíam em Misto por isso.
+
+Para voltar a exigir a perna de hedge, basta `INCENTIVADA_EXIGE_HEDGE_DAP=true`
+no .env: o código do teste continua aqui, apenas desligado por padrão.
+
+>>> O QUE É "COMPORTAMENTO DE IPCA+", E POR QUE A PERNA DE HEDGE FOI MEDIDA
 
 O fundo de debênture incentivada compra o papel em B + spread (NTN-B de
 referência mais o prêmio de crédito) e vende cupom de IPCA no futuro de DAP.
@@ -58,10 +68,19 @@ import unicodedata
 from app.config import settings
 from app.models.schemas import Bucket
 
-# "Incentivada", "Incentivado", "INCENTIVADAS"… O radical cobre as flexões sem
-# deixar passar palavra parecida: não há outro termo com "INCENTIVAD" em nome
-# de fundo. A busca é sobre o nome já sem acento e em caixa alta.
-_RE_INCENTIVADA = re.compile(r"INCENTIVAD[AO]")
+# Duas famílias de nome declaram debênture incentivada:
+#
+#   INCENTIVAD[AO]  "Debêntures Incentivadas", "Incentivado"… o radical cobre
+#                   as flexões e não há outro termo parecido em nome de fundo.
+#   INFRA           "FI INFRA" é o sufixo padrão do Fundo de Investimento em
+#                   Infraestrutura, que por construção carrega papel da lei
+#                   12.431. São 1.291 fundos que o primeiro padrão não pegava —
+#                   quase dez vezes o universo que tínhamos.
+#
+# O segundo casa apenas com a palavra inteira ou com as formas por extenso
+# ("INFRAESTRUTURA", "INFRASTRUTTURA"). Sem isso, `\bINFRA` pegaria "INFRANET",
+# que é nome de empresa na carteira e não o mandato do fundo.
+_RE_INCENTIVADA = re.compile(r"INCENTIVAD[AO]|\bINFRA(\b|ESTRUTURA\b|STRUTTURA\b)")
 
 
 def _sem_acento(texto) -> str:

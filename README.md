@@ -21,6 +21,7 @@ casar o **CNPJ do fundo** com bases abertas da CVM e do SND:
 | `EXTRATO` | taxa de adm., cotização, aplicação mínima, público-alvo | ~69% |
 | `registro_fundo_classe` | gestor, administrador, classificação ANBIMA | ~92% |
 | `CDA` + SND | **composição da carteira e hedge em DAP → classificação LF / Incentivada / Tradicional / Misto**, mix por papel | ~65% |
+| `CDA` BLC_5 | **quem emitiu o papel bancario**: tesouraria, preco (% CDI / spread), vencimento | 100% do BLC_5 |
 | `LAMINA` | índice de referência declarado | ~2% |
 
 Cada campo carrega a sua cobertura até a tela: o aviso do topo diz em quantos
@@ -37,6 +38,10 @@ Captacao_Resgate/
 │   ├── scripts/          gerar_mock.py
 │   └── requirements.txt
 ├── frontend/         site estático (HTML/CSS/JS) que consome a API
+│   ├── index.html        dashboard de captacao/resgate
+│   ├── tesourarias.html  mapa Tesouraria x Asset
+│   ├── fundos.html       papel bancario por fundo, papel a papel
+│   └── admin.html        painel de controle
 ├── data/
 │   ├── inbox/        anexos vinculado_*.xlsx baixados do e-mail
 │   ├── cache/        parquets da CVM
@@ -346,6 +351,115 @@ gera; sem ele, `js/api.js` cai no padrão `http://localhost:8000`).
 
 </details>
 
+## Tesourarias — o mapa Tesouraria ↔ Asset
+
+`http://localhost:5500/tesourarias.html`, ou o botão **🏛 Tesourarias**.
+
+O dashboard responde "quem está captando". Esta tela responde a camada onde o
+negócio de fato acontece, e a diferença é concreta: *"a Asset X compra LF"* não
+é uma ligação. *"A Asset X tem R$ 26,6 bi do Banco Y a CDI + 1,28%, prazo médio
+de 2,7 anos, com R$ 4,3 bi vencendo em 12 meses, e captou R$ 1,8 bi na semana"*
+é.
+
+Sai do bloco **BLC_5 do CDA** (Letra Financeira, CDB/RDB, DPGE), que é o mais
+bem preenchido de todo o CDA: `CNPJ_EMISSOR` em 100% das linhas, `DT_VENC` em
+100%, e o preço em 100% do papel indexado a CDI. São 90.327 posições e
+R$ 877,7 bi em abr/2026.
+
+### As três perguntas da tela
+
+| | |
+|---|---|
+| **Ranking** | quais tesourarias o mercado carrega, quanto, a que preço, a que prazo, e quanto vence em 12 meses |
+| **Quem já compra** | por asset: posição, preço que ela paga, prazo, o que está vencendo e quanto do papel bancário dela é daquele emissor |
+| **Quem ainda não compra** | assets com apetite comprovado pela classe — já compram de outros bancos, já têm limite montado — e a taxa que pagam hoje, que é o número a bater |
+
+O dossiê de cada gestora, no dashboard principal, ganhou o lado inverso: **de
+quais tesourarias aquela casa compra**, com preço e vencimento. É a pergunta que
+antecede a ligação.
+
+### Decisões que mudam o número na tela
+
+**Agrupamento pela raiz do CNPJ, nunca pelo nome.** O campo `EMISSOR` é texto
+livre digitado pelo administrador: **795 grafias no arquivo são 179 emissores de
+verdade**. O Bradesco aparece como "BRADESCO", "BANCO BRADESCO S.A.", "BCO
+BRADESCO SA" e mais sete variações, somando R$ 136 bi. Um ranking por nome
+quebraria a maior posição do mercado em dez pedaços e nenhum apareceria no topo.
+
+**Preço são dois campos, e não convertemos um no outro.** Papel bancário é
+cotado como percentual do CDI (`103,5% do CDI`) *ou* como CDI mais spread
+(`CDI + 0,9%`). O CDA guarda os dois; a mediana do mercado é a segunda forma. A
+conversão dependeria do nível do CDI na data e produziria um número que ninguém
+negociou. Ambos vêm **ponderados por valor** — uma ponta de R$ 1 mi a CDI+3% não
+move o custo de quem tem R$ 200 mi a CDI+0,8%.
+
+**Posição intragrupo vem marcada.** `EMISSOR_LIGADO` no CDA identifica a asset
+do próprio banco carregando papel da casa. Não é negócio disputável, e sem a
+marca ela lideraria a lista de clientes como se fosse conquista comercial — a
+Bradesco Asset carrega 28% do papel do Bradesco, e na Caixa a fatia intragrupo é
+de 46%.
+
+**O nocional vem do vencimento declarado, faixa a faixa.** A curva de rolagem é
+montada posição a posição e só depois somada. Derivá-la do prazo médio perderia
+o que interessa: um par com metade em 60 dias e metade em 5 anos tem média de
+2,6 anos e nada vencendo nela.
+
+> **São posições, não emissões.** Descrevem o estoque que os fundos carregavam
+> na data-base do CDA, com a mesma defasagem proposital do resto do projeto.
+> Apresentar como "o banco emitiu X" seria errado, e a tela diz isso no topo.
+
+## Papel bancário por fundo — LF, CDB e DPGE, papel a papel
+
+`http://127.0.0.1:5500/fundos.html`, ou o botão **📄 Papel bancário**.
+
+Mesma matéria-prima da aba Tesourarias, lida pela ponta oposta e sem agregar
+nada. Lá a pergunta é "quem carrega o meu papel"; aqui é **"o que exatamente
+este fundo tem na carteira"** — emissor por emissor, vencimento por vencimento,
+taxa por taxa.
+
+A distinção não é cosmética. A tela de tesourarias trabalha com prazo médio,
+spread médio e faixas de vencimento, que respondem "como está o meu funding no
+mercado". Não respondem "quando exatamente vence e a quanto ele comprou", que é
+o que se precisa para ligar oferecendo a rolagem de um papel específico.
+
+| Nível | O que mostra |
+|---|---|
+| Lista | fundos que carregam papel bancário: volume, nº de papéis, nº de emissores, taxa média, prazo, % do PL, o que vence em 12m e o mix LF/CDB/DPGE |
+| Detalhe | **uma linha por papel**: emissor, tipo, data exata de vencimento, mês/ano, taxa e volume |
+| Agenda | quanto vence em cada mês/ano — clicável, filtra a lista de papéis |
+| Emissores | concentração por tesouraria dentro do fundo, também clicável |
+
+Leitura real de uma linha do detalhe: `BANCO SAFRA · LF · 04/05/2026 · mai/2026
+· CDI + 0,50% · R$ 238,5 mi`.
+
+### Decisões
+
+**Nada é média.** Cada linha é um papel. Posições idênticas que o administrador
+quebrou em várias linhas são somadas; vencimentos ou taxas diferentes
+permanecem separados, porque juntá-los destruiria exatamente a informação
+procurada. A única média da tela é o `spread_cdi` do resumo do fundo, e ela é
+restrita ao pós-fixado em CDI/Selic — misturar CDI (mediana +0,90%), IPCA
+(+7,30%) e prefixado (12,80%) numa média só produziria um número que não
+descreve nada.
+
+**A taxa aparece na forma em que foi declarada.** `CDI + 0,50%`, `103,5% do
+CDI`, `IPCA + 7,30%` ou a taxa cheia no prefixado. Converter uma na outra
+dependeria do nível do CDI na data e produziria um número que ninguém negociou.
+
+**Escopo:** LF, CDB/RDB e DPGE. Letra de câmbio/hipotecária/imobiliária e o
+"Outros" do arquivo ficam fora — 18 mil linhas sem tipo declarado que só
+sujariam o total.
+
+> **O CDA não separa LF de LFSC e LFSN.** O campo de tipo do arquivo público diz
+> apenas "Letra Financeira", então a subordinação não aparece. Essa quebra
+> existe na base do Quantum e importa — LFSC e LFSN são outro risco e outro
+> preço. O campo `instrumento` em `connectors/cvm_emissores.py` é o ponto de
+> enxerto: refiná-lo pelo código CETIP ou ISIN do papel faz a quebra aparecer
+> em toda a tela sem mexer em mais nada.
+
+Medido no CDA de abr/2026: **71.559 papéis de LF/CDB/DPGE, R$ 847,8 bi, em
+3.172 fundos**, com taxa declarada em 93,6% das posições.
+
 ## Painel de controle
 
 `http://localhost:5500/admin.html`, ou o botão **⚙ Painel** no cabeçalho.
@@ -596,6 +710,10 @@ Cada fundo da lista mostra o bucket com a carteira que o gerou no *tooltip*
 | GET | `/api/dossie/{gestora}` | Painel lateral: resumo, mix, métricas, fundos |
 | GET | `/api/movers?direcao=pos\|neg` | Gestoras por variação de PL em 30d (ou por fluxo, sem PL) |
 | GET | `/api/stress?limite=N` | Fundos com resgate anormal |
+| GET | `/api/tesourarias` | Ranking de tesourarias emissoras: estoque, preco, prazo, rolagem |
+| GET | `/api/tesourarias/{raiz}` | Dossie: quem compra, curva de vencimento e quem ainda nao compra |
+| GET | `/api/carteira-bancaria` | Fundos que carregam LF/CDB/DPGE, do maior ao menor |
+| GET | `/api/carteira-bancaria/{cnpj}` | Os papeis de um fundo: emissor, vencimento exato, volume e taxa |
 | GET | `/api/fonte` | Arquivo em uso e campos indisponíveis |
 | POST | `/api/admin/refresh` | Re-varre o Outlook e recalcula o pipeline (recarrega a fonte) |
 | GET | `/api/admin/parametros` | Parametros editaveis e o retrato atual da classificacao |

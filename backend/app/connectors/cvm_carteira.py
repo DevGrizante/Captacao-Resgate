@@ -59,24 +59,19 @@ inferência por volatilidade sozinha dizia "95% pós".
 """
 from __future__ import annotations
 
-import io
 import logging
 import re
 import time
 import unicodedata
 import zipfile
-from datetime import date
 
 import pandas as pd
-import requests
 
 from app.config import CACHE_DIR, settings
-from app.connectors import snd_debentures
+from app.connectors import cvm_cda_arquivo, snd_debentures
 from app.utils import so_digitos
 
 logger = logging.getLogger("cvm_carteira")
-
-URL_CDA = "https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{aaaamm}.zip"
 
 # Sufixo = versão do schema: mudou coluna, o cache antigo deixa de ser achado.
 # v2 acrescentou as colunas de hedge em DAP.
@@ -103,13 +98,6 @@ def _fresco() -> bool:
         _CACHE.exists()
         and (time.time() - _CACHE.stat().st_mtime) / 3600 < settings.CDA_TTL_HORAS
     )
-
-
-def _mes_alvo() -> str:
-    """AAAAMM de `CDA_DEFASAGEM_MESES` atrás."""
-    hoje = date.today()
-    total = hoje.year * 12 + (hoje.month - 1) - settings.CDA_DEFASAGEM_MESES
-    return f"{total // 12:04d}{total % 12 + 1:02d}"
 
 
 def _eixo_posfx(ds_indexador, titulo_posfx) -> str | None:
@@ -276,13 +264,10 @@ def carregar() -> pd.DataFrame:
         logger.info("CDA: usando cache local.")
         return pd.read_parquet(_CACHE)
 
-    mes = _mes_alvo()
-    try:
-        resp = requests.get(URL_CDA.format(aaaamm=mes), timeout=settings.CVM_TIMEOUT_S)
-        resp.raise_for_status()
-        z = zipfile.ZipFile(io.BytesIO(resp.content))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("CDA %s indisponível (%s) — seguindo sem composição.", mes, e)
+    mes = cvm_cda_arquivo.mes_alvo()
+    z = cvm_cda_arquivo.abrir(mes)
+    if z is None:
+        logger.warning("CDA %s indisponível — seguindo sem composição.", mes)
         return pd.DataFrame()
 
     mapa_snd = snd_debentures.carregar()

@@ -20,6 +20,10 @@
       </div>
     </div>
     <div class="flex items-center gap-2">
+      <a href="tesourarias.html" class="pill px-3 py-1.5 text-xs rounded-md bg-amber-700/40 hover:bg-amber-700/60 border border-amber-800/50"
+         title="Quem carrega papel de cada tesouraria, a que preço e o que vence">🏛 Tesourarias</a>
+      <a href="fundos.html" class="pill px-3 py-1.5 text-xs rounded-md bg-emerald-700/40 hover:bg-emerald-700/60 border border-emerald-800/50"
+         title="LF, CDB e DPGE por fundo: emissor, vencimento, volume e taxa de cada papel">📄 Papel bancário</a>
       <a href="admin.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700"
          title="Painel de controle: parâmetros de classificação">⚙ Painel</a>
       <button class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">Exportar PDF</button>
@@ -53,7 +57,7 @@
         <div class="flex gap-1 mt-1.5" id="idx-tabs">
           <button data-i="todos" class="pill px-3 py-1 text-xs rounded pill-active">Todos</button>
           <button data-i="incentivada" class="pill px-3 py-1 text-xs rounded bg-slate-800"
-                  title="Nome traz &quot;Incentivada/o&quot; E a carteira opera IPCA+ de fato: compra em B + spread com hedge do cupom em DAP.">Incentivada</button>
+                  title="Nome traz &quot;Incentivada/o&quot; ou &quot;Infra&quot; E a carteira é majoritariamente IPCA+.">Incentivada</button>
           <button data-i="tradicional" class="pill px-3 py-1 text-xs rounded bg-slate-800"
                   title="Sem &quot;Incentivada/o&quot; no nome E carteira atrelada a CDI+ (inclui IPCA+ integralmente travado em DAP).">Tradicional</button>
           <button data-i="lf" class="pill px-3 py-1 text-xs rounded bg-slate-800"
@@ -141,11 +145,18 @@
           <option value="perf">Performance · retorno e risco</option>
           <option value="dist">Distribuição · quem compra</option>
         </select>
+        <span class="text-slate-500">Fluxo:</span>
+        <select id="fluxo-filtro" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none"
+          title="Filtra pela janela que está sendo ordenada; nas ordenações sem sinal (PL, rentabilidade, nº de fundos) usa a janela do topo.">
+          <option value="captacao">Captação</option>
+          <option value="resgate">Resgate</option>
+        </select>
         <span class="text-slate-500">Ordenar:</span>
         <select id="sort-by" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
-          <option value="semestral">|Semestral|</option>
-          <option value="mensal">|Mensal|</option>
-          <option value="semanal">|Semanal|</option>
+          <option value="semestral">Semestral</option>
+          <option value="mensal">Mensal</option>
+          <option value="semanal">Semanal</option>
+          <option value="diaria">Diária</option>
           <option value="pl">PL</option>
           <option value="rentab_media_pct">Rentabilidade</option>
           <option value="fundos">Nº fundos</option>
@@ -292,6 +303,27 @@
     </div>
 
 
+    <div id="d-tesourarias-box">
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+        De quais tesourarias compra <span class="text-slate-600 normal-case" id="d-tes-total"></span>
+      </p>
+      <p class="text-[10px] text-slate-500 mb-2">
+        Antes de oferecer um emissor, saber se a casa já opera com ele — e a que preço — muda a conversa.
+      </p>
+      <div class="card rounded-lg overflow-hidden">
+        <table class="w-full text-xs">
+          <thead><tr class="text-left text-slate-500">
+            <th class="px-3 py-2 font-medium">Tesouraria</th>
+            <th class="px-3 py-2 font-medium text-right">Posição</th>
+            <th class="px-3 py-2 font-medium text-right">Preço</th>
+            <th class="px-3 py-2 font-medium text-center">Prazo</th>
+            <th class="px-3 py-2 font-medium text-right">Vence 12m</th>
+          </tr></thead>
+          <tbody id="d-tesourarias"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div>
       <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Métricas da carteira</p>
       <div class="grid grid-cols-3 gap-3 text-center">
@@ -334,8 +366,8 @@
   </div>
 </aside>
 
-<script src="js/config.js?v=7"></script>
-<script src="js/api.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/config.js?v=17"></script>
+<script src="js/api.js?v=17"></script>
+<script src="js/app.js?v=17"></script>
 </body>
 </html>

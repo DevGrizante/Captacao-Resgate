@@ -44,13 +44,18 @@ rem O "python" do PATH pode ser o atalho da Microsoft Store, que nao executa
 rem nada e so abre a loja. Priorizamos versoes estaveis (3.10 a 3.12)
 rem porque versoes muito recentes (3.13+) nao tem pacotes pre-compilados e tentam
 rem baixar compiladores C/Rust, o que quebra em redes corporativas.
+rem
+rem Cada tentativa e um bloco `if` explicito. A forma compacta
+rem `if not defined PY call :x && set ...` nao e confiavel em cmd: um `if` com
+rem condicao falsa nao altera o errorlevel, e o `&&` acaba julgando o resultado
+rem do comando ANTERIOR em vez do teste que acabou de rodar.
 set "PY="
-call :testar_python "py -3.12" && set "PY=py -3.12"
-if not defined PY call :testar_python "py -3.11" && set "PY=py -3.11"
-if not defined PY call :testar_python "py -3.10" && set "PY=py -3.10"
-if not defined PY call :testar_python "py -3.9" && set "PY=py -3.9"
-if not defined PY call :testar_python "python" && set "PY=python"
-if not defined PY call :testar_python "py -3" && set "PY=py -3"
+for %%c in ("py -3.12" "py -3.11" "py -3.10" "python" "py -3" "py -3.9") do (
+    if not defined PY (
+        call :testar_python %%c
+        if not errorlevel 1 set "PY=%%~c"
+    )
+)
 
 if not defined PY (
     color 0C
@@ -141,14 +146,22 @@ if "!WEB_PORT!"=="" (
 )
 echo [INFO] API na porta !API_PORT! - frontend na porta !WEB_PORT!
 
+rem NOTA SOBRE 127.0.0.1 EM VEZ DE "localhost"
+rem Medido nesta maquina: conectar em "localhost" custa 208 ms, contra 1,7 ms
+rem em "127.0.0.1". O Windows resolve localhost para ::1 (IPv6) primeiro, os
+rem servidores escutam so em IPv4, e cada conexao paga o timeout do fallback.
+rem O front faz varias chamadas por tela, entao isso e a diferenca entre a
+rem interface parecer instantanea e parecer travada. "localhost" continua
+rem funcionando se o usuario digitar - so nao e mais o que geramos.
+
 rem O front precisa saber onde a API subiu, e a API precisa liberar o CORS
 rem para onde o front subiu. As duas pontas saem daqui, do mesmo lugar.
 > "%~dp0frontend\js\config.js" (
     echo // Gerado pelo Iniciar.bat com a porta em que a API subiu.
     echo // Editar a mao tambem funciona.
-    echo window.API_BASE = "http://localhost:!API_PORT!";
+    echo window.API_BASE = "http://127.0.0.1:!API_PORT!";
 )
-set "CORS_ORIGINS=http://localhost:!WEB_PORT!,http://127.0.0.1:!WEB_PORT!"
+set "CORS_ORIGINS=http://127.0.0.1:!WEB_PORT!,http://localhost:!WEB_PORT!"
 
 rem --- 5) Subir os servidores ------------------------------------------------
 rem As duas janelas herdam CORS_ORIGINS daqui - processo filho recebe o
@@ -175,16 +188,17 @@ echo.
 echo ========================================================
 echo [SUCESSO] Tudo pronto^^!
 echo.
-echo   Dashboard ........ http://localhost:!WEB_PORT!
-echo   Painel de controle http://localhost:!WEB_PORT!/admin.html
-echo   API / docs ....... http://localhost:!API_PORT!/docs
+echo   Dashboard ........ http://127.0.0.1:!WEB_PORT!
+echo   Tesourarias ...... http://127.0.0.1:!WEB_PORT!/tesourarias.html
+echo   Painel de controle http://127.0.0.1:!WEB_PORT!/admin.html
+echo   API / docs ....... http://127.0.0.1:!API_PORT!/docs
 echo.
 echo Mantenha as duas janelas pretas abertas enquanto usa o painel.
 echo Para desligar, feche-as.
 echo ========================================================
 echo.
 
-start "" "http://localhost:!WEB_PORT!"
+start "" "http://127.0.0.1:!WEB_PORT!"
 ping -n 4 127.0.0.1 >nul
 exit /b 0
 
@@ -194,9 +208,30 @@ rem  Sub-rotinas
 rem ===========================================================================
 
 rem Roda o interpretador candidato e confere a versao. Retorna 0 se serve.
+rem :testar_python <comando> - o candidato serve?
+rem
+rem EXIGE QUE O INTERPRETADOR RESPONDA, e nao apenas que o errorlevel seja 0.
+rem Motivo: `py -3.12` devolve 0 mesmo quando o 3.12 NAO esta instalado - o
+rem launcher imprime "The system cannot find the path specified." e sai com
+rem sucesso. Olhando so o errorlevel, o script elegia um interpretador que nao
+rem existe, e a falha aparecia tres passos adiante, na criacao do venv, sem
+rem relacao aparente com a causa. Interpretador ausente nao imprime nada.
+rem
+rem A PREFERENCIA POR 3.10-3.12 ESTA NA ORDEM DA LISTA, NAO AQUI. Versoes muito
+rem novas as vezes ainda nao tem wheel para todos os pacotes e o pip cai para
+rem compilar do fonte, o que quebra em rede corporativa - por isso elas sao as
+rem ultimas da fila. Mas recusa-las de vez faria o script nao subir em maquina
+rem que so tem a versao nova, que e um estrago maior que o risco que evita.
+rem O codigo Python nao pode conter ">": dentro de `for /f ('...')` o cmd nao
+rem desfaz o escape `^>` antes de entregar o comando, e o Python receberia
+rem `version_info^>=(3,9)`, que e erro de sintaxe. Por isso a versao volta como
+rem numero (313 para 3.13) e a comparacao acontece aqui no batch.
 :testar_python
-%~1 -c "import sys; sys.exit(0 if (3,9) <= sys.version_info < (3,13) else 1)" >nul 2>&1
-exit /b %errorlevel%
+set "_resp="
+for /f "delims=" %%r in ('%~1 -c "import sys;print(sys.version_info.major*100+sys.version_info.minor)" 2^>nul') do set "_resp=%%r"
+if not defined _resp exit /b 1
+if !_resp! GEQ 309 exit /b 0
+exit /b 1
 
 rem :porta_livre <porta inicial> <nome da variavel de saida>
 rem Anda para cima ate achar uma porta sem ninguem ouvindo. Devolve vazio se

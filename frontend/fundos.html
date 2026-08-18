@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Papel bancário por gestora</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="min-h-screen">
+
+<header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-40">
+  <div class="max-w-[1500px] mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center font-bold">L</div>
+      <div>
+        <h1 class="text-sm font-semibold">Papel bancário por gestora · LF, CDB e DPGE</h1>
+        <p class="text-xs text-slate-500" id="hdr-meta">Carregando…</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Dashboard</a>
+      <a href="tesourarias.html" class="pill px-3 py-1.5 text-xs rounded-md bg-amber-700/40 hover:bg-amber-700/60 border border-amber-800/50">🏛 Tesourarias</a>
+    </div>
+  </div>
+</header>
+
+<div id="erro-api" class="hidden bg-red-950 border-b border-red-900 text-red-300 text-sm px-6 py-3"></div>
+
+<div class="bg-amber-950/40 border-b border-amber-900/50 text-amber-200/90 text-xs px-6 py-2">
+  <div class="max-w-[1500px] mx-auto">
+    <span id="aviso-resumo">—</span>
+    <button type="button" class="underline underline-offset-2 hover:text-amber-100 ml-1" id="aviso-toggle">ver detalhes</button>
+    <div class="hidden space-y-1 mt-2 pt-2 border-t border-amber-900/40" id="aviso-detalhe">
+      <div><strong>Cada linha do detalhe é um bloco consolidado:</strong> mesmo emissor, mesmo tipo e
+        mesmo mês de vencimento viram uma linha só, com o volume somado e a taxa média ponderada pelo
+        volume. A coluna <em>Papéis</em> diz quantos registros entraram na linha.</div>
+      <div><strong>A taxa é a declarada pelo fundo</strong> no CDA da data-base, e aparece na forma em que
+        o papel foi cotado: <code>CDI + x%</code> quando é spread, <code>y% do DI</code> quando é
+        percentual do índice, <code>IPCA + x%</code> na inflação e a taxa cheia no prefixado. Papéis do
+        mesmo bloco cotados em formas diferentes ficam em linhas separadas — mediar "CDI + 1,35%" com
+        "102% do DI" daria um número que não existe.</div>
+      <div><strong>O CDA não separa LF de LFSC e LFSN.</strong> O campo de tipo do arquivo público diz
+        apenas "Letra Financeira", então a subordinação não aparece aqui. Essa quebra existe na base do
+        Quantum e pode ser cruzada pelo código do papel.</div>
+      <div><strong>Papel já vencido não aparece.</strong> O CDA é uma foto com 4 meses de defasagem, e
+        lista papel que estava vivo na data-base e já liquidou desde então — hoje são R$ 103,1 bi em
+        8.775 posições, 12,2% do estoque, vencidas entre maio e julho. Não há o que rolar num papel
+        liquidado, então eles saem. O <strong>mês corrente fica inteiro</strong>: parte dele ainda vence.</div>
+      <div><strong>Prazo e "vence em 12 meses" contam a partir de hoje</strong>, e não da data-base da
+        carteira. Como o universo passou a ser "o que está vivo agora", contar de abr/2026 faria
+        "12 meses" significar 8 meses à frente de quem lê a tela.</div>
+    </div>
+  </div>
+</div>
+
+<main class="max-w-[1500px] mx-auto px-6 py-6 space-y-6">
+
+  <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="card rounded-lg p-4" id="kpi-total"></div>
+    <div class="card rounded-lg p-4" id="kpi-fundos"></div>
+    <div class="card rounded-lg p-4" id="kpi-taxa"></div>
+    <div class="card rounded-lg p-4" id="kpi-venc"></div>
+  </section>
+
+  <section class="card rounded-lg overflow-hidden">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h2 class="text-sm font-semibold">Gestoras que carregam papel bancário</h2>
+        <p class="text-[10px] text-slate-500">Clique numa gestora para ver a carteira consolidada: emissor, mês de vencimento, volume e taxa</p>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <input type="text" id="busca" placeholder="Buscar gestora..."
+          class="bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs w-64 focus:outline-none focus:border-blue-600">
+        <span class="text-slate-500">Ordenar:</span>
+        <select id="ordenar" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+          <option value="valor">Volume</option>
+          <option value="valor_venc_12m">Vencendo em 12m</option>
+          <option value="spread_cdi">Taxa</option>
+          <option value="pct_pl">% do PL</option>
+          <option value="emissores">Nº de emissores</option>
+          <option value="posicoes">Nº de papéis</option>
+        </select>
+      </div>
+    </div>
+    <div class="max-h-[600px] overflow-y-auto scrollbar">
+      <table class="w-full text-xs">
+        <thead><tr class="text-left text-slate-400">
+          <th class="px-4 py-2 font-medium">Gestora</th>
+          <th class="px-4 py-2 font-medium text-right">Volume</th>
+          <th class="px-4 py-2 font-medium text-center">Papéis</th>
+          <th class="px-4 py-2 font-medium text-center">Emissores</th>
+          <th class="px-4 py-2 font-medium text-right">Taxa média</th>
+          <th class="px-4 py-2 font-medium text-center">Prazo</th>
+          <th class="px-4 py-2 font-medium text-right">% do PL</th>
+          <th class="px-4 py-2 font-medium text-right">Vence 12m</th>
+          <th class="px-4 py-2 font-medium text-center">LF / CDB / DPGE</th>
+        </tr></thead>
+        <tbody id="tabela"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="text-xs text-slate-600 text-center py-4 border-t border-slate-800/50" id="rodape">
+    Captação e Resgate · Crédito Privado
+  </footer>
+</main>
+
+<!-- Detalhe da gestora -->
+<div id="dossie-overlay" class="fixed inset-0 bg-black/50 z-40 hidden opacity-0" onclick="fecharDossie()"></div>
+<aside id="dossie" class="dossie-closed fixed top-0 right-0 h-full w-full max-w-[900px] bg-slate-950 border-l border-slate-800 z-50 flex flex-col">
+  <div class="p-5 border-b border-slate-800 flex items-start justify-between">
+    <div class="min-w-0">
+      <p class="text-[10px] uppercase tracking-wider text-slate-500">Carteira de papel bancário</p>
+      <h2 class="text-base font-semibold mt-0.5 truncate" id="d-nome">—</h2>
+      <p class="text-xs text-slate-500 mt-1" id="d-meta">—</p>
+    </div>
+    <button onclick="fecharDossie()" class="text-slate-500 hover:text-slate-200 text-2xl leading-none shrink-0 ml-3">×</button>
+  </div>
+  <div class="flex-1 overflow-y-auto scrollbar p-5 space-y-5" id="d-corpo">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="d-kpis"></div>
+
+    <div>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+        Agenda de vencimentos <span class="text-slate-600 normal-case">· por mês/ano</span>
+      </p>
+      <div class="card rounded-lg p-3 overflow-x-auto scrollbar">
+        <div class="flex items-end gap-1 h-24 min-w-max" id="d-agenda"></div>
+        <div class="flex gap-1 mt-1 min-w-max" id="d-agenda-labels"></div>
+      </div>
+    </div>
+
+    <div>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+        Concentração por emissor
+      </p>
+      <div class="flex flex-wrap gap-1.5" id="d-emissores"></div>
+    </div>
+
+    <div>
+      <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
+        <p class="text-[11px] uppercase tracking-wider text-slate-500">
+          Papéis em carteira <span class="text-slate-600 normal-case" id="d-papeis-n"></span>
+        </p>
+        <div class="flex items-center gap-2 text-[11px]">
+          <input type="text" id="d-filtro" placeholder="filtrar emissor..."
+            class="bg-slate-900 border border-slate-800 rounded px-2 py-1 w-40 focus:outline-none focus:border-blue-600">
+          <select id="d-tipo" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+            <option value="">Todos os tipos</option>
+            <option value="lf">LF</option>
+            <option value="cdb">CDB</option>
+            <option value="dpge">DPGE</option>
+          </select>
+          <select id="d-ordem" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+            <option value="vencimento">Por vencimento</option>
+            <option value="valor">Por volume</option>
+            <option value="spread">Por taxa</option>
+            <option value="emissor">Por emissor</option>
+          </select>
+        </div>
+      </div>
+      <div class="card rounded-lg overflow-hidden">
+        <!-- overflow-x como rede de segurança: com a coluna do emissor presa
+             a tabela cabe, mas numa janela estreita ela rola dentro do card em
+             vez de empurrar o painel. -->
+        <div class="max-h-[420px] overflow-y-auto overflow-x-auto scrollbar">
+          <table class="w-full text-xs">
+            <thead><tr class="text-left text-slate-500">
+              <th class="px-3 py-2 font-medium text-center">Tipo</th>
+              <th class="px-3 py-2 font-medium">Emissor</th>
+              <th class="px-3 py-2 font-medium text-center">Mês/ano</th>
+              <th class="px-3 py-2 font-medium text-center" title="Quantos papéis foram somados nesta linha">Papéis</th>
+              <th class="px-3 py-2 font-medium text-right">Taxa</th>
+              <th class="px-3 py-2 font-medium text-right">Volume</th>
+              <th class="px-3 py-2 font-medium text-right">%</th>
+            </tr></thead>
+            <tbody id="d-papeis"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<script src="js/config.js?v=14"></script>
+<script src="js/api.js?v=14"></script>
+<script src="js/fundos.js?v=14"></script>
+</body>
+</html>

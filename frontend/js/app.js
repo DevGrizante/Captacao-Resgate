@@ -1,5 +1,6 @@
 // ===== Estado e utilidades =====
-const state = { janela: "semanal", indexador: "todos", abertos: true, sortBy: "semestral", search: "", moversDir: "pos", view: "fluxo" };
+const state = { janela: "semanal", indexador: "todos", abertos: true, sortBy: "semestral",
+                search: "", moversDir: "pos", view: "fluxo", fluxo: "captacao" };
 let DATA = null;        // payload /api/dashboard
 let sparkChart = null;
 let timelineChart = null;
@@ -146,9 +147,11 @@ function renderFonte() {
       `${pct(f.fundos_com_carteira)}. A defasagem é proposital: no mês corrente ` +
       `46% do PL fica sob sigilo e a carteira visível seria uma amostra enviesada. ` +
       `<em>Incentivada</em> exige duas coisas ao mesmo tempo: o nome do fundo trazer ` +
-      `“Incentivada/o” e a carteira operar IPCA+ de fato — comprar em B + spread e ` +
-      `travar o cupom de inflação em DAP. Nome sem carteira que confirme cai em ` +
-      `<em>Misto</em>, com o motivo visível no dossiê. ` +
+      `“Incentivada/o” ou “Infra” (o sufixo FI-INFRA é o do fundo de infraestrutura, ` +
+      `que carrega papel da lei 12.431) e a carteira ser majoritariamente IPCA+. ` +
+      `Nome sem carteira que confirme cai em <em>Misto</em>, com o motivo visível no ` +
+      `dossiê. A cobertura de hedge em DAP continua medida e aparece no dossiê, mas ` +
+      `não decide mais o bucket. ` +
       `Fundo com muito sigilo, indexador desconhecido em boa parte da carteira ou ` +
       `pouco crédito perto do PL fica <em>sem classificação</em> — nunca com bucket ` +
       `adivinhado.`);
@@ -224,7 +227,7 @@ function renderKpisFluxo() {
     comparacao = `<span class="${cls(delta)}">${delta >= 0 ? "▲" : "▼"} ${fmtBRL(Math.abs(delta)).replace("+", "")}</span> vs. semana anterior`;
   }
   document.getElementById("kpi-fluxo").innerHTML = `
-    <p class="text-xs text-slate-500 uppercase tracking-wide">Fluxo líquido · janela</p>
+    <p class="text-xs text-slate-500 uppercase tracking-wide">NET · janela</p>
     <p class="text-2xl font-semibold mt-1 ${cls(k.fluxo_liquido)}">${fmtBRL(k.fluxo_liquido)}</p>
     <p class="text-xs mt-1">${comparacao}</p>`;
 
@@ -363,9 +366,27 @@ function renderTimeline() {
   });
 }
 
+// Um "top" só pode listar quem de fato teve o movimento. Cortar por posição
+// — as 10 primeiras da lista ordenada — enche a tela de gestoras com fluxo
+// zero e, pior, coloca RESGATES dentro do "Top captação" quando menos de dez
+// casas captaram na janela. Foi o que aconteceu no filtro Incentivada, onde
+// só cinco gestoras captaram: as outras cinco linhas do topo eram zeros e
+// saídas exibidas como se fossem entradas.
+const CAMPOS_FLUXO = ["diaria", "semanal", "mensal", "semestral"];
+
+function topFluxo(gestoras, janela, sentido, limite = 10) {
+  const entrada = sentido === "captacao";
+  return gestoras
+    .filter(g => (entrada ? g[janela] > 0 : g[janela] < 0))
+    .sort((a, b) => (entrada ? b[janela] - a[janela] : a[janela] - b[janela]))
+    .slice(0, limite);
+}
+
+const SEM_FLUXO = (sentido) =>
+  `<p class="text-[11px] text-slate-600 py-2">Nenhuma gestora ${sentido} nesta janela.</p>`;
+
 function renderTop() {
   const w = state.janela;
-  const sorted = [...DATA.gestoras].sort((a, b) => b[w] - a[w]);
   const maxAbs = Math.max(...DATA.gestoras.map(g => Math.abs(g[w]))) || 1;
   const bar = (g, color) => {
     const v = g[w]; const pct = Math.abs(v) / maxAbs * 100;
@@ -377,8 +398,12 @@ function renderTop() {
       <div class="h-1 bg-slate-800 rounded"><div class="h-full ${color} rounded" style="width:${pct}%"></div></div>
     </div>`;
   };
-  document.getElementById("top-cap").innerHTML = sorted.slice(0, 10).map(g => bar(g, "bg-emerald-500")).join("");
-  document.getElementById("top-res").innerHTML = sorted.slice(-10).reverse().map(g => bar(g, "bg-red-500")).join("");
+  const cap = topFluxo(DATA.gestoras, w, "captacao");
+  const res = topFluxo(DATA.gestoras, w, "resgate");
+  document.getElementById("top-cap").innerHTML =
+    cap.length ? cap.map(g => bar(g, "bg-emerald-500")).join("") : SEM_FLUXO("captou");
+  document.getElementById("top-res").innerHTML =
+    res.length ? res.map(g => bar(g, "bg-red-500")).join("") : SEM_FLUXO("resgatou");
 }
 
 // Colunas por visão. Uma tabela única com tudo teria 16 colunas e nenhuma
@@ -499,12 +524,34 @@ function renderTable() {
 
   const q = state.search.toLowerCase();
   const key = state.sortBy;
-  // Ordena por magnitude (um resgate de 5 bi importa tanto quanto uma captação
-  // de 5 bi). Gestora sem o campo vai para o fim, nunca para o topo.
-  const peso = g => (g[key] === null || g[key] === undefined) ? -1 : Math.abs(g[key]);
-  const sorted = DATA.gestoras
-    .filter(g => g.nome.toLowerCase().includes(q))
-    .sort((a, b) => peso(b) - peso(a));
+  let linhas = DATA.gestoras.filter(g => g.nome.toLowerCase().includes(q));
+
+  // O filtro age sobre a janela que está sendo ordenada. Quando a ordenação é
+  // por PL, rentabilidade ou nº de fundos — que não têm sinal de fluxo — ele
+  // cai na janela global escolhida no topo, para "Captação" continuar
+  // significando alguma coisa.
+  const campo = CAMPOS_FLUXO.includes(key) ? key : state.janela;
+  const entrada = state.fluxo === "captacao";
+  linhas = linhas.filter(g => (entrada ? g[campo] > 0 : g[campo] < 0));
+
+  // Ordena pelo VALOR, com sinal — resgate é número negativo, não módulo. Em
+  // "Resgate" a ordem inverte, para a maior saída aparecer primeiro. Gestora
+  // sem o campo vai para o fim, nunca para o topo.
+  const crescente = !entrada && CAMPOS_FLUXO.includes(key);
+  const valor = g => (g[key] === null || g[key] === undefined) ? null : g[key];
+  const sorted = linhas.sort((a, b) => {
+    const va = valor(a), vb = valor(b);
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    return crescente ? va - vb : vb - va;
+  });
+
+  if (!sorted.length) {
+    document.getElementById("table-body").innerHTML =
+      `<tr><td colspan="${cols.length + 1}" class="px-4 py-6 text-center text-slate-600">
+        Nenhuma gestora ${entrada ? "captou" : "resgatou"} nesta janela.</td></tr>`;
+    return;
+  }
 
   document.getElementById("table-body").innerHTML = sorted.map(g =>
     `<tr class="row-hover border-t border-slate-800 cursor-pointer" onclick="openDossie('${esc(g.nome)}')">
@@ -659,6 +706,8 @@ async function openDossie(nome) {
       (g.carteira_credito ? ` <span class="text-slate-600">· sobre ${fmtBRL(g.carteira_credito).replace("+", "")} em crédito</span>` : "");
   }
 
+  renderTesourarias(d);
+
   if (sparkChart) sparkChart.destroy();
   const ds = [];
   for (const k of ORDEM_BUCKETS) {
@@ -743,6 +792,40 @@ async function openDossie(nome) {
     document.getElementById("dossie").classList.add("dossie-open");
   });
 }
+// De quais tesourarias esta casa compra. É o lado inverso da tela de
+// tesourarias, e vive no dossiê porque é a pergunta que antecede a ligação:
+// "ela já opera com esse banco?". Some quando não há mapa de emissores — sem
+// CDA a seção não teria o que dizer, e uma tabela vazia sugeriria que a casa
+// não compra papel bancário, que é outra coisa.
+function renderTesourarias(d) {
+  const caixa = document.getElementById("d-tesourarias-box");
+  const lista = d.tesourarias || [];
+  if (!lista.length) {
+    caixa.classList.add("hidden");
+    return;
+  }
+  caixa.classList.remove("hidden");
+  document.getElementById("d-tes-total").textContent =
+    d.papel_bancario ? `· ${fmtBRL(d.papel_bancario).replace("+", "")} em papel bancário` : "";
+
+  const preco = (t) => (t.spread ? `CDI + ${t.spread.toFixed(2)}%` : VAZIO);
+  const prazo = (t) => (t.prazo_dias === null || t.prazo_dias === undefined) ? VAZIO
+    : (t.prazo_dias >= 365 ? `${(t.prazo_dias / 365).toFixed(1)}a` : `${Math.round(t.prazo_dias)}d`);
+
+  document.getElementById("d-tesourarias").innerHTML = lista.map(t => `
+    <tr class="border-t border-slate-800/50">
+      <td class="px-3 py-2">
+        <div class="truncate max-w-[180px]">${t.nome}</div>
+        ${t.pct_do_bancario !== null
+          ? `<div class="text-[9px] text-slate-600">${t.pct_do_bancario.toFixed(0)}% do bancário dela</div>` : ""}
+      </td>
+      <td class="px-3 py-2 text-right font-mono">${fmtBRL(t.valor).replace("+", "")}</td>
+      <td class="px-3 py-2 text-right font-mono text-slate-400">${preco(t)}</td>
+      <td class="px-3 py-2 text-center text-slate-400">${prazo(t)}</td>
+      <td class="px-3 py-2 text-right font-mono text-slate-400">${fmtBRL(t.valor_venc_12m).replace("+", "")}</td>
+    </tr>`).join("");
+}
+
 function closeDossie() {
   document.getElementById("dossie-overlay").style.opacity = "0";
   document.getElementById("dossie").classList.add("dossie-closed");
@@ -757,6 +840,7 @@ function bindEvents() {
   document.getElementById("abertos-checkbox").addEventListener("change", e => { state.abertos = e.target.checked; refreshData(); });
   document.getElementById("search").addEventListener("input", e => { state.search = e.target.value; renderTable(); });
   document.getElementById("sort-by").addEventListener("change", e => { state.sortBy = e.target.value; renderTable(); });
+  document.getElementById("fluxo-filtro").addEventListener("change", e => { state.fluxo = e.target.value; renderTable(); });
   document.getElementById("view-mode").addEventListener("change", e => { state.view = e.target.value; renderTable(); });
   document.getElementById("movers-dir").addEventListener("change", e => { state.moversDir = e.target.value; renderMovers(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeDossie(); });
@@ -795,8 +879,6 @@ async function openIdxDossie(bucket) {
   // Buscar os dados do dashboard filtrados para este indexador
   const res = await API.dashboard({ ...state, indexador: bucket });
   const w = state.janela;
-  const sorted = [...res.gestoras].sort((a, b) => b[w] - a[w]);
-  
   const maxAbs = Math.max(...res.gestoras.map(g => Math.abs(g[w]))) || 1;
   const bar = (g, color) => {
     const v = g[w]; const pct = Math.abs(v) / maxAbs * 100;
@@ -813,8 +895,12 @@ async function openIdxDossie(bucket) {
   document.getElementById("idx-d-window-cap").textContent = `janela ${state.janela}`;
   document.getElementById("idx-d-window-res").textContent = `janela ${state.janela}`;
 
-  document.getElementById("idx-top-cap").innerHTML = sorted.slice(0, 10).map(g => bar(g, "bg-emerald-500")).join("");
-  document.getElementById("idx-top-res").innerHTML = sorted.slice(-10).reverse().map(g => bar(g, "bg-red-500")).join("");
+  const cap = topFluxo(res.gestoras, w, "captacao");
+  const resg = topFluxo(res.gestoras, w, "resgate");
+  document.getElementById("idx-top-cap").innerHTML =
+    cap.length ? cap.map(g => bar(g, "bg-emerald-500")).join("") : SEM_FLUXO("captou");
+  document.getElementById("idx-top-res").innerHTML =
+    resg.length ? resg.map(g => bar(g, "bg-red-500")).join("") : SEM_FLUXO("resgatou");
 
   document.getElementById("idx-dossie-overlay").classList.remove("hidden");
   // Animação de abertura

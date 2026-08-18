@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tesourarias · Crédito Privado</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="min-h-screen">
+
+<header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-40">
+  <div class="max-w-[1400px] mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center font-bold">T</div>
+      <div>
+        <h1 class="text-sm font-semibold">Tesourarias · quem carrega o papel</h1>
+        <p class="text-xs text-slate-500" id="hdr-meta">Carregando…</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Dashboard</a>
+      <a href="fundos.html" class="pill px-3 py-1.5 text-xs rounded-md bg-emerald-700/40 hover:bg-emerald-700/60 border border-emerald-800/50">📄 Papel bancário</a>
+      <a href="admin.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">⚙ Painel</a>
+    </div>
+  </div>
+</header>
+
+<div id="erro-api" class="hidden bg-red-950 border-b border-red-900 text-red-300 text-sm px-6 py-3"></div>
+
+<div class="bg-amber-950/40 border-b border-amber-900/50 text-amber-200/90 text-xs px-6 py-2">
+  <div class="max-w-[1400px] mx-auto">
+    <span id="aviso-resumo">—</span>
+    <button type="button" class="underline underline-offset-2 hover:text-amber-100 ml-1" id="aviso-toggle">ver detalhes</button>
+    <div class="hidden space-y-1 mt-2 pt-2 border-t border-amber-900/40" id="aviso-detalhe">
+      <div><strong>São posições declaradas, não emissões.</strong> Vêm do bloco BLC_5 do CDA da CVM
+        (Letra Financeira, CDB/RDB, DPGE), que descreve o <em>estoque</em> que os fundos carregavam na
+        data-base — não o que o banco emitiu no mês.</div>
+      <div><strong>A defasagem é proposital.</strong> No CDA do mês corrente 46% do PL fica sob sigilo e
+        a carteira visível seria uma amostra enviesada. Lemos com 4 meses de atraso, quando o sigilo
+        praticamente zera.</div>
+      <div><strong>Emissores são agrupados pela raiz do CNPJ, não pelo nome.</strong> O campo de nome é
+        texto livre: 795 grafias no arquivo são 179 emissores de verdade. O Bradesco sozinho aparece
+        com dez escritas diferentes.</div>
+      <div><strong>Preço ponderado por valor.</strong> "CDI + 0,9%" é a média do que aquele conjunto de
+        posições paga, pesada pelo tamanho de cada uma — uma ponta pequena e cara não move o número.</div>
+      <div><strong>Intragrupo</strong> é a asset do próprio banco carregando papel da casa
+        (<code>EMISSOR_LIGADO</code> no CDA). Fica marcado porque não é negócio disputável.</div>
+    </div>
+  </div>
+</div>
+
+<main class="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+
+  <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="card rounded-lg p-4" id="kpi-estoque"></div>
+    <div class="card rounded-lg p-4" id="kpi-emissores"></div>
+    <div class="card rounded-lg p-4" id="kpi-venc"></div>
+    <div class="card rounded-lg p-4" id="kpi-preco"></div>
+  </section>
+
+  <section class="card rounded-lg overflow-hidden">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h2 class="text-sm font-semibold">Tesourarias emissoras</h2>
+        <p class="text-[10px] text-slate-500">Clique numa linha para ver quem compra, o que vence e quem ainda não compra</p>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <input type="text" id="busca" placeholder="Buscar tesouraria..."
+          class="bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs w-56 focus:outline-none focus:border-blue-600">
+        <span class="text-slate-500">Ordenar:</span>
+        <select id="ordenar" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+          <option value="valor">Estoque</option>
+          <option value="valor_venc_12m">Vencendo em 12m</option>
+          <option value="spread">Spread</option>
+          <option value="gestoras">Nº de assets</option>
+          <option value="prazo_dias">Prazo</option>
+        </select>
+      </div>
+    </div>
+    <div class="max-h-[620px] overflow-y-auto scrollbar">
+      <table class="w-full text-xs">
+        <thead><tr class="text-left text-slate-400">
+          <th class="px-4 py-2 font-medium">Tesouraria</th>
+          <th class="px-4 py-2 font-medium text-right">Estoque</th>
+          <th class="px-4 py-2 font-medium text-right">Share</th>
+          <th class="px-4 py-2 font-medium text-center">Assets</th>
+          <th class="px-4 py-2 font-medium text-center">Fundos</th>
+          <th class="px-4 py-2 font-medium text-right">Preço</th>
+          <th class="px-4 py-2 font-medium text-center">Prazo</th>
+          <th class="px-4 py-2 font-medium text-right">Vence 12m</th>
+          <th class="px-4 py-2 font-medium text-center">Intragrupo</th>
+        </tr></thead>
+        <tbody id="tabela"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="text-xs text-slate-600 text-center py-4 border-t border-slate-800/50" id="rodape">
+    Captação e Resgate · Crédito Privado
+  </footer>
+</main>
+
+<!-- Dossiê lateral da tesouraria -->
+<div id="dossie-overlay" class="fixed inset-0 bg-black/50 z-40 hidden opacity-0" onclick="fecharDossie()"></div>
+<aside id="dossie" class="dossie-closed fixed top-0 right-0 h-full w-full max-w-[720px] bg-slate-950 border-l border-slate-800 z-50 flex flex-col">
+  <div class="p-5 border-b border-slate-800 flex items-start justify-between">
+    <div>
+      <p class="text-[10px] uppercase tracking-wider text-slate-500">Tesouraria</p>
+      <h2 class="text-lg font-semibold mt-0.5" id="d-nome">—</h2>
+      <p class="text-xs text-slate-500 mt-1" id="d-meta">—</p>
+    </div>
+    <button onclick="fecharDossie()" class="text-slate-500 hover:text-slate-200 text-2xl leading-none">×</button>
+  </div>
+  <div class="flex-1 overflow-y-auto scrollbar p-5 space-y-6" id="d-corpo">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="d-kpis"></div>
+
+    <div>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+        Curva de vencimento <span class="text-slate-600 normal-case">· a agenda de rolagem</span>
+      </p>
+      <div class="flex h-3 w-full rounded overflow-hidden bg-slate-800" id="d-curva-bar"></div>
+      <div class="grid grid-cols-5 gap-2 mt-2 text-center text-[10px]" id="d-curva-legend"></div>
+    </div>
+
+    <div>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+        Quem já compra <span class="text-slate-600 normal-case" id="d-compradores-n"></span>
+      </p>
+      <div class="card rounded-lg overflow-hidden">
+        <table class="w-full text-xs">
+          <thead><tr class="text-left text-slate-500">
+            <th class="px-3 py-2 font-medium">Asset</th>
+            <th class="px-3 py-2 font-medium text-right">Posição</th>
+            <th class="px-3 py-2 font-medium text-right">Preço</th>
+            <th class="px-3 py-2 font-medium text-center">Prazo</th>
+            <th class="px-3 py-2 font-medium text-right">Vence 12m</th>
+            <th class="px-3 py-2 font-medium text-right">Fluxo sem.</th>
+          </tr></thead>
+          <tbody id="d-compradores"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+        Ainda não compram desta tesouraria
+      </p>
+      <p class="text-[10px] text-slate-500 mb-2">
+        Assets com apetite comprovado por papel bancário — já têm limite montado e compram de outros
+        emissores. A coluna de preço mostra a que taxa eles compram hoje, que é o número a bater.
+      </p>
+      <div class="card rounded-lg overflow-hidden">
+        <table class="w-full text-xs">
+          <thead><tr class="text-left text-slate-500">
+            <th class="px-3 py-2 font-medium">Asset</th>
+            <th class="px-3 py-2 font-medium text-right">Bancário (outros)</th>
+            <th class="px-3 py-2 font-medium text-center">Emissores</th>
+            <th class="px-3 py-2 font-medium text-right">Paga hoje</th>
+            <th class="px-3 py-2 font-medium text-right">Fluxo sem.</th>
+          </tr></thead>
+          <tbody id="d-oportunidades"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<script src="js/config.js?v=7"></script>
+<script src="js/api.js?v=7"></script>
+<script src="js/tesourarias.js?v=7"></script>
+</body>
+</html>

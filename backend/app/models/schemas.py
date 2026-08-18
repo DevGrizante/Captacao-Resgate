@@ -319,6 +319,11 @@ class DossieResponse(BaseModel):
     sparkline_lf: list[float] = []
     sparkline_misto: list[float] = []
     fundos: list[Fundo]
+    # De quais tesourarias este asset compra, em ordem de tamanho. É o lado
+    # inverso da tela de tesourarias: aqui a pergunta é "com quem esta casa já
+    # opera", que é o que a mesa precisa antes de ligar oferecendo um emissor.
+    tesourarias: list[TesourariaNaCarteira] = []
+    papel_bancario: Optional[float] = None   # R$ total em LF/CDB/DPGE
 
 
 class StressFundo(BaseModel):
@@ -345,6 +350,185 @@ class MoverGestora(BaseModel):
     cotizacao_media: Optional[int] = None
     fluxo: float = 0.0
     var_pl_pct: Optional[float] = None
+
+
+# ---------- mesa Tesouraria x Asset ----------
+class TesourariaResumo(BaseModel):
+    """Uma tesouraria emissora, vista pelo papel dela que está nos fundos.
+
+    Todos os valores vêm do BLC_5 do CDA, na data de `carteira_data`. São
+    posições declaradas, não emissões: descrevem o estoque que o mercado
+    carrega, e é isso que interessa para saber com quem falar.
+    """
+    raiz: str                                # raiz do CNPJ — a chave estável
+    nome: str
+    valor: float                             # R$ do papel deste emissor nos fundos
+    share_pct: Optional[float] = None        # fatia do papel bancário do universo
+    fundos: int
+    gestoras: int                            # quantos assets distintos carregam
+    # Preço ponderado por valor. Os dois convivem porque o mercado cota das duas
+    # formas; `None` quando o papel do emissor não é indexado a CDI.
+    pct_cdi: Optional[float] = None          # 103.5 = "103,5% do CDI"
+    spread: Optional[float] = None           # 0.9   = "CDI + 0,9% a.a."
+    prazo_dias: Optional[float] = None
+    # O que vence em até 12 meses a partir da data-base da carteira. É a
+    # agenda de rolagem: papel vencendo é conversa marcada.
+    valor_venc_12m: float = 0.0
+    pct_venc_12m: Optional[float] = None
+    # Quanto do estoque está na asset do próprio grupo (`EMISSOR_LIGADO` do
+    # CDA). Não é negócio disputável — a Bradesco Asset é a maior carregadora
+    # de papel do Bradesco, e sem esta marca ela lideraria a lista de clientes
+    # como se fosse uma conquista comercial.
+    pct_ligado: Optional[float] = None
+    carteira_data: Optional[str] = None
+
+
+class CompradorTesouraria(BaseModel):
+    """Um asset que carrega papel de uma tesouraria — a linha da lista de contatos."""
+    gestora: str
+    valor: float
+    fundos: int
+    pct_cdi: Optional[float] = None
+    spread: Optional[float] = None
+    prazo_dias: Optional[float] = None
+    valor_venc_12m: float = 0.0
+    # Contexto de fluxo: um asset captando tem dinheiro para alocar agora.
+    # Vem do mesmo pipeline do dashboard, então é o fluxo real da janela.
+    pl: Optional[float] = None
+    fluxo_semanal: float = 0.0
+    fluxo_mensal: float = 0.0
+    # Concentração: quanto do papel bancário deste asset é desta tesouraria.
+    # Alta demais é limite de crédito perto do teto; baixa é espaço para crescer.
+    pct_do_bancario: Optional[float] = None
+    # Posição intragrupo (asset do próprio banco emissor). A linha continua na
+    # lista — ela é parte do estoque — mas marcada, porque não é disputável.
+    ligado: bool = False
+
+
+class OportunidadeTesouraria(BaseModel):
+    """Um asset que compra papel bancário mas NÃO desta tesouraria.
+
+    É a lista de prospecção: já tem apetite comprovado pela classe de ativo e
+    limite operacional montado, só não comprou deste emissor. Ordenada pelo
+    tamanho do que ele já carrega de outros bancos — é a melhor proxy de
+    quanto ele poderia carregar deste.
+    """
+    gestora: str
+    valor_bancario: float                    # R$ que carrega de OUTRAS tesourarias
+    emissores: int                           # de quantas tesourarias diferentes
+    fundos: int
+    pl: Optional[float] = None
+    fluxo_semanal: float = 0.0
+    fluxo_mensal: float = 0.0
+    spread_medio: Optional[float] = None     # a que preço ele compra dos outros
+
+
+class FaixaPrazo(BaseModel):
+    """Uma faixa da curva de vencimentos."""
+    rotulo: str                              # "até 3m", "3-6m", …
+    valor: float
+    pct: Optional[float] = None
+
+
+class TesourariaDossie(BaseModel):
+    """Tudo sobre uma tesouraria: quem compra, a que preço, o que vence, quem falta."""
+    resumo: TesourariaResumo
+    compradores: list[CompradorTesouraria]
+    oportunidades: list[OportunidadeTesouraria]
+    curva_vencimento: list[FaixaPrazo]
+
+
+class TesourariaNaCarteira(BaseModel):
+    """Uma tesouraria dentro da carteira de um asset — o lado inverso da tela."""
+    raiz: str
+    nome: str
+    valor: float
+    pct_do_bancario: Optional[float] = None
+    spread: Optional[float] = None
+    prazo_dias: Optional[float] = None
+    valor_venc_12m: float = 0.0
+
+
+# ---------- carteira de papel bancário, posição a posição ----------
+class PosicaoBancaria(BaseModel):
+    """Uma linha da carteira: emissor + tipo + mês de vencimento + taxa.
+
+    CONSOLIDADA, não posição individual. Papéis do mesmo emissor, mesmo tipo e
+    mesmo mês de vencimento viram uma linha só, com o volume somado — é assim
+    que a mesa lê a carteira, porque o que se negocia é "o bloco do Safra que
+    vence em fev/27", não cada registro solto do CDA.
+
+    A taxa entra na consolidação: papéis do mesmo bloco mas com taxas em formas
+    diferentes NÃO se juntam (ver `forma`), senão a média misturaria "CDI+1,35"
+    com "102% do DI" e produziria um número que não existe.
+    """
+    raiz_emissor: str
+    emissor: str
+    instrumento: str                    # lf | cdb | dpge
+    mes_venc: str                       # "2027-02" — o eixo da agenda
+    indexador: str                      # cdi | selic | ipca | pre | outro
+    # UM número, e o que ele significa. A separação existe porque o mercado
+    # cota papel bancário de duas formas e o CDA guarda as duas:
+    #   cdi_spread -> "CDI + 1,35%"     (taxa abaixo de 90)
+    #   pct_di     -> "102,0% do DI"    (taxa acima de 90)
+    #   ipca       -> "IPCA + 5,37%"
+    #   pre        -> "13,50% a.a."
+    taxa: Optional[float] = None
+    forma: Optional[str] = None
+    valor: float
+    papeis: int = 1                     # quantos registros foram somados aqui
+    quantidade: Optional[float] = None
+    # Quanto do bloco é posição intragrupo (`EMISSOR_LIGADO` do CDA), em % do
+    # valor. `ligado` é a leitura binária disso e só liga quando a maior parte
+    # do bloco é intragrupo — marcar por "existe pelo menos uma" pintava R$ 1,39
+    # bi de papel de terceiro como se fosse da casa por causa de R$ 3,3 mi.
+    pct_ligado: Optional[float] = None
+    ligado: bool = False
+
+
+class VencimentoMes(BaseModel):
+    """Quanto vence num mês. O eixo da agenda de rolagem."""
+    mes: str                            # "2027-02"
+    valor: float
+    posicoes: int
+
+
+class FundoPapelBancario(BaseModel):
+    """Uma GESTORA, resumida pelo papel bancário que a casa carrega.
+
+    A unidade é a casa, não o veículo: quem decide alocação é a gestora, e uma
+    asset com 40 fundos carregando LF do mesmo banco é uma conversa só.
+    """
+    gestora: str
+    fundos: int                         # quantos fundos da casa carregam papel
+    valor: float                        # R$ em LF + CDB + DPGE, somado
+    posicoes: int
+    emissores: int
+    # PL somado dos fundos da casa que carregam papel bancário — contado uma
+    # vez por CNPJ, para a subclasse não repetir o mesmo patrimônio.
+    pl: Optional[float] = None
+    pct_pl: Optional[float] = None      # quanto desse PL é papel bancário
+    # Taxa média ponderada por valor, só do papel pós-fixado em CDI/Selic —
+    # misturar com IPCA e pré daria um número sem significado.
+    spread_cdi: Optional[float] = None
+    prazo_dias: Optional[float] = None
+    # Duas janelas de rolagem. A de 3 meses é a agenda da mesa — o que
+    # precisa de conversa agora; a de 12 meses é o horizonte do ano.
+    valor_venc_3m: float = 0.0
+    valor_venc_12m: float = 0.0
+    pct_lf: Optional[float] = None
+    pct_cdb: Optional[float] = None
+    pct_dpge: Optional[float] = None
+    carteira_data: Optional[str] = None
+
+
+class FundoPapelBancarioDetalhe(BaseModel):
+    """O que aparece ao clicar numa gestora: os papéis, e a agenda deles."""
+    gestora: FundoPapelBancario
+    posicoes: list[PosicaoBancaria]
+    por_mes: list[VencimentoMes]
+    # Concentração por emissor dentro desta gestora, já ordenada.
+    por_emissor: list[TesourariaNaCarteira]
 
 
 # ---------- painel de controle (área admin) ----------

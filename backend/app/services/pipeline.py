@@ -21,7 +21,10 @@ import logging
 import time
 from collections import defaultdict
 
+import pandas as pd
+
 from app.config import settings
+from app.connectors import cvm_emissores
 from app.connectors.base import DataConnector
 from app.connectors.cvm_cadastro import CVMCadastroEnricher
 from app.connectors.cvm_connector import CVMConnector
@@ -41,8 +44,17 @@ from app.models.schemas import (
     MoverGestora,
     SerieTemporalPonto,
     StressFundo,
+    FundoPapelBancario,
+    FundoPapelBancarioDetalhe,
+    TesourariaDossie,
+    TesourariaResumo,
 )
-from app.services import credito_privado, perfil_indexador
+from app.services import (
+    carteira_bancaria,
+    credito_privado,
+    perfil_indexador,
+    tesourarias,
+)
 from app.services.classifier import classificar, nome_incentivado
 
 logger = logging.getLogger("pipeline")
@@ -71,6 +83,20 @@ class Pipeline:
         self._caches: dict[tuple, dict] = {}
         self._cache_ts: float = 0.0
         self._fundos: list[Fundo] = []
+        # Mapa fundo x tesouraria emissora (BLC_5 do CDA). Fica fora do `Fundo`
+        # de propósito: são 23 mil pares, e embutir isso no payload do
+        # dashboard multiplicaria o tamanho da resposta por nada — só as telas
+        # de tesouraria precisam dele.
+        self._emissores: pd.DataFrame = pd.DataFrame()
+        # Derivados do mapa, montados uma vez por carga: converter os 23 mil
+        # pares a cada requisicao custava ~300 ms, e navegar entre tesourarias
+        # e justamente o gesto que a mesa mais repete.
+        self._tesourarias: tesourarias.Contexto = tesourarias.Contexto()
+        # A mesma materia-prima lida pela outra ponta: o que cada FUNDO
+        # carrega, posicao a posicao, com vencimento e taxa exatos.
+        self._carteira_bancaria: carteira_bancaria.Contexto = (
+            carteira_bancaria.Contexto()
+        )
         self._janelas: list[dict] = []
         self._fonte_info: FonteInfo = FonteInfo(fonte=settings.DATA_SOURCE)
         self._data_referencia: str | None = None
@@ -211,6 +237,22 @@ class Pipeline:
                 sinais_credito=c.get("sinais_credito") or [],
             ))
         self._fundos = fundos
+        # O mapa de emissores vem depois dos fundos porque só faz sentido com
+        # eles: é sempre lido no recorte do universo já filtrado. Falhar aqui
+        # não pode derrubar o dashboard — as telas de tesouraria somem, o resto
+        # continua de pé.
+        try:
+            self._emissores = cvm_emissores.carregar()
+            self._tesourarias = tesourarias.preparar(fundos, self._emissores)
+            self._carteira_bancaria = carteira_bancaria.preparar(
+                fundos, cvm_emissores.carregar_posicoes(),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Mapa de emissores indisponível (%s).", e)
+            self._emissores = pd.DataFrame()
+            self._tesourarias = tesourarias.Contexto()
+            self._carteira_bancaria = carteira_bancaria.Contexto()
+
         self._caches.clear()
         self._cache_ts = time.time()
         logger.info(
@@ -560,6 +602,11 @@ class Pipeline:
                 for j in ultimas
             ]
 
+        # De quais tesourarias esta casa compra. Vai no dossiê porque é a
+        # primeira pergunta antes de ligar oferecendo um emissor: saber se ela
+        # já opera com o banco, e a que preço, muda a conversa inteira.
+        emissoras, bancario = tesourarias.por_gestora(self._tesourarias, gestora)
+
         return DossieResponse(
             gestora=g,
             classe_majoritaria=classe,
@@ -570,6 +617,8 @@ class Pipeline:
             sparkline_lf=_spark(Bucket.LF),
             sparkline_misto=_spark(Bucket.MISTO),
             fundos=fundos[:50],
+            tesourarias=emissoras,
+            papel_bancario=bancario,
         )
 
     def movers(self, direcao: str = "pos", limite: int = 6, janela: str = "semanal",
@@ -617,6 +666,26 @@ class Pipeline:
     def fonte_info(self) -> FonteInfo:
         self._garantir()
         return self._fonte_info
+
+    # ---------- mesa Tesouraria x Asset ----------
+    def tesourarias(self, limite: int = 40) -> list[TesourariaResumo]:
+        self._garantir()
+        return tesourarias.ranking(self._tesourarias, limite)
+
+    def tesouraria(self, raiz: str, limite: int = 40) -> TesourariaDossie | None:
+        self._garantir()
+        return tesourarias.dossie(self._tesourarias, raiz, limite)
+
+    def carteira_bancaria(self, limite: int = 200,
+                          busca: str = "") -> list[FundoPapelBancario]:
+        self._garantir()
+        return carteira_bancaria.listar(self._carteira_bancaria, limite, busca)
+
+    def carteira_bancaria_gestora(
+        self, gestora: str,
+    ) -> FundoPapelBancarioDetalhe | None:
+        self._garantir()
+        return carteira_bancaria.detalhe(self._carteira_bancaria, gestora)
 
 
 # ---------- helpers ----------
