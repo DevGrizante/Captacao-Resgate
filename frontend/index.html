@@ -4,9 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Captação · Crédito Privado</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="css/styles.css">
+<!-- CSS gerado por build/gerar_css.bat a partir das classes realmente
+     usadas. Substitui o cdn.tailwindcss.com (407 KB baixados e compilados
+     no navegador a cada carga) por 17 KB servidos da propria maquina. -->
+<link rel="stylesheet" href="css/tailwind.css?v=21">
+<script src="js/vendor/chart.umd.min.js?v=21" defer></script>
+<link rel="stylesheet" href="css/styles.css?v=21">
 </head>
 <body class="min-h-screen">
 
@@ -28,6 +31,11 @@
          title="Painel de controle: parâmetros de classificação">⚙ Painel</a>
       <button class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">Exportar PDF</button>
       <button class="pill px-3 py-1.5 text-xs rounded-md bg-blue-600 hover:bg-blue-500">Compartilhar link</button>
+      <form method="post" action="/logout" class="inline">
+        <button type="submit" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200"
+                title="Encerrar a sessão neste navegador">Sair</button>
+      </form>
+
     </div>
   </div>
 </header>
@@ -366,8 +374,8 @@
   </div>
 </aside>
 
-<script src="js/config.js?v=17"></script>
-<script src="js/api.js?v=17"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/config.js?v=21" defer></script>
+<script src="js/api.js?v=21" defer></script>
+<script src="js/app.js?v=21" defer></script>
 </body>
 </html>

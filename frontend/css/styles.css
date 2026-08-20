@@ -27,3 +27,41 @@ select.mini:focus { outline:none; border-color:#3b82f6; }
 .dossie-closed { transform: translateX(100%); }
 .dossie-open { transform: translateX(0); }
 .loading { opacity: .4; pointer-events: none; }
+
+/* ---- Chave de visão: gestora -> papel  |  papel -> gestora ----------------
+   As duas leituras são a MESMA carteira, e a chave precisa dizer isso: um
+   controle só, com o botão deslizando entre as pontas. Duas abas separadas
+   sugeririam duas telas, e a mesa passaria a procurar em qual delas o número
+   estava certo. O knob é um elemento próprio para poder animar `transform`,
+   que roda na GPU — animar `left` repintaria a barra a cada quadro. */
+.visao-slider { position: relative; display: inline-flex; padding: 3px; background: #0f172a; border: 1px solid #1f2937; border-radius: 9999px; }
+.visao-knob { position: absolute; top: 3px; left: 3px; width: calc(50% - 3px); height: calc(100% - 6px); border-radius: 9999px; background: linear-gradient(135deg, #059669, #0d9488); transition: transform .28s cubic-bezier(.16,1,.3,1); }
+.visao-slider[data-ativo="emissor"] .visao-knob { transform: translateX(100%); }
+.visao-opcao { position: relative; z-index: 1; min-width: 168px; padding: 5px 14px; border-radius: 9999px; font-size: 11px; font-weight: 500; color: #94a3b8; background: transparent; border: 0; cursor: pointer; white-space: nowrap; transition: color .2s ease; }
+.visao-opcao:hover { color: #cbd5e1; }
+.visao-opcao[aria-selected="true"] { color: #fff; }
+.visao-opcao:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.visao-seta { opacity: .6; margin: 0 5px; }
+/* Quem move a régua espera a tela reagir; sem isto a troca de visão fica
+   indistinguível de um clique que não pegou. */
+@media (prefers-reduced-motion: reduce) { .visao-knob { transition: none; } }
+/* Campo de vencimento com texto que não vira mês nenhum. Vermelho só depois de
+   a pessoa terminar de digitar — ver `ligarCampoMes`. */
+.borda-erro { border-color: #b91c1c !important; }
+
+/* ---- Combo de vencimento: lista que abre E aceita digitar ------------------
+   O <datalist> nativo parece a solução óbvia e não é: cada navegador decide
+   sozinho quando mostrar a lista, não há como abri-la num clique e ela não
+   mostra o volume de cada mês. Aqui a lista é nossa.
+
+   `position: fixed` porque o combo vive dentro de um card com overflow-hidden
+   (e, no dossiê, dentro de um painel que rola): qualquer posicionamento
+   absoluto seria recortado pelo pai. Em troca, a lista fecha ao rolar. */
+.combo { position: relative; display: inline-flex; align-items: center; }
+.combo-botao { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #64748b; background: none; border: 0; cursor: pointer; font-size: 11px; line-height: 1; padding: 2px; }
+.combo-botao:hover { color: #e2e8f0; }
+.combo-lista { position: fixed; z-index: 60; margin: 0; padding: 4px; list-style: none; background: #0f172a; border: 1px solid #334155; border-radius: 6px; box-shadow: 0 12px 28px rgba(0,0,0,.55); overflow-y: auto; }
+.combo-opcao { display: flex; justify-content: space-between; gap: 12px; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #cbd5e1; cursor: pointer; white-space: nowrap; }
+.combo-opcao:hover, .combo-marcado { background: #1e293b; color: #fff; }
+.combo-extra { color: #64748b; font-variant-numeric: tabular-nums; }
+.combo-vazio { padding: 6px 8px; font-size: 11px; color: #64748b; }

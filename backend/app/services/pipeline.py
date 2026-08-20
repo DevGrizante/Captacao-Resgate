@@ -36,6 +36,8 @@ from app.models.schemas import (
     BucketResumo,
     DashboardResponse,
     DossieResponse,
+    EmissorPapelBancarioDetalhe,
+    EmissorPapelBancarioNaLista,
     FonteInfo,
     Fundo,
     GestoraResumo,
@@ -686,6 +688,20 @@ class Pipeline:
     ) -> FundoPapelBancarioDetalhe | None:
         self._garantir()
         return carteira_bancaria.detalhe(self._carteira_bancaria, gestora)
+
+    # A mesma carteira lida pela ponta do emissor — "quem tem o meu papel".
+    def papel_por_emissor(self, limite: int = 300,
+                          busca: str = "") -> list[EmissorPapelBancarioNaLista]:
+        self._garantir()
+        return carteira_bancaria.listar_emissores(
+            self._carteira_bancaria, limite, busca,
+        )
+
+    def papel_por_emissor_detalhe(
+        self, raiz: str,
+    ) -> EmissorPapelBancarioDetalhe | None:
+        self._garantir()
+        return carteira_bancaria.detalhe_emissor(self._carteira_bancaria, raiz)
 
 
 # ---------- helpers ----------

@@ -1,0 +1,5 @@
+/* Entrada do build do Tailwind. Gera ../css/tailwind.css.
+   Não editar o CSS gerado: ele é reescrito a cada build (build/gerar_css.bat). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

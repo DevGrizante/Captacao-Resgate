@@ -4,8 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tesourarias · Crédito Privado</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="css/styles.css">
+<!-- CSS gerado por build/gerar_css.bat a partir das classes realmente
+     usadas. Substitui o cdn.tailwindcss.com (407 KB baixados e compilados
+     no navegador a cada carga) por 17 KB servidos da propria maquina. -->
+<link rel="stylesheet" href="css/tailwind.css?v=21">
+<link rel="stylesheet" href="css/styles.css?v=21">
 </head>
 <body class="min-h-screen">
 
@@ -22,6 +25,11 @@
       <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Dashboard</a>
       <a href="fundos.html" class="pill px-3 py-1.5 text-xs rounded-md bg-emerald-700/40 hover:bg-emerald-700/60 border border-emerald-800/50">📄 Papel bancário</a>
       <a href="admin.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">⚙ Painel</a>
+      <form method="post" action="/logout" class="inline">
+        <button type="submit" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200"
+                title="Encerrar a sessão neste navegador">Sair</button>
+      </form>
+
     </div>
   </div>
 </header>
@@ -166,8 +174,8 @@
   </div>
 </aside>
 
-<script src="js/config.js?v=7"></script>
-<script src="js/api.js?v=7"></script>
-<script src="js/tesourarias.js?v=7"></script>
+<script src="js/config.js?v=21" defer></script>
+<script src="js/api.js?v=21" defer></script>
+<script src="js/tesourarias.js?v=21" defer></script>
 </body>
 </html>

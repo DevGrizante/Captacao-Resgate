@@ -40,7 +40,7 @@ Captacao_Resgate/
 ├── frontend/         site estático (HTML/CSS/JS) que consome a API
 │   ├── index.html        dashboard de captacao/resgate
 │   ├── tesourarias.html  mapa Tesouraria x Asset
-│   ├── fundos.html       papel bancario por fundo, papel a papel
+│   ├── fundos.html       papel bancario nas duas pontas: gestora e emissor
 │   └── admin.html        painel de controle
 ├── data/
 │   ├── inbox/        anexos vinculado_*.xlsx baixados do e-mail
@@ -291,24 +291,66 @@ fundo sem composição fica **sem bucket**, e não "Misto" — *Misto* significa
 A única exigência é **Python 3.10+ instalado**. O `Iniciar.bat` cuida do resto:
 acha o interpretador (inclusive via `py -3`, e rejeitando o atalho da Microsoft
 Store, que não executa nada), cria o ambiente virtual, instala as dependências,
-copia o `.env` do exemplo, escolhe as portas, sobe API e front, espera a API
-responder e abre o navegador.
+copia o `.env` do exemplo, escolhe a porta, sobe o servidor, espera a API
+responder, **pré-carrega as bases** e abre o navegador.
 
 | | |
 |---|---|
-| Dashboard | `http://localhost:5500` |
-| Painel de controle | `http://localhost:5500/admin.html` |
-| API / docs | `http://localhost:8000/docs` |
+| Dashboard | `http://127.0.0.1:8000/` |
+| Tesourarias | `http://127.0.0.1:8000/tesourarias.html` |
+| Papel bancário | `http://127.0.0.1:8000/fundos.html` |
+| Painel de controle | `http://127.0.0.1:8000/admin.html` |
+| API / docs | `http://127.0.0.1:8000/docs` |
+
+**Uma porta, uma janela.** Até 18/08/2026 subiam dois servidores: o uvicorn na
+8000 e um `python -m http.server` na 5500 para os arquivos do painel. O
+`http.server` fala HTTP/1.0 — fecha a conexão TCP a cada arquivo, não manda
+`ETag` nem `Cache-Control` e não comprime nada. Hoje a própria API serve o
+painel (`app.mount("/")` no `main.py`), o que resolve tudo isso de uma vez e
+ainda dispensa CORS, porque passa a ser a mesma origem.
+
+**Por que ele pré-carrega antes de abrir a tela.** A primeira chamada de dados
+lê a planilha, cruza as bases da CVM e classifica os fundos — medido nesta
+máquina, **199 s** com o cache do dia ainda frio. Sem o aquecimento, esse tempo
+era pago pelo usuário olhando um "Carregando…" sem explicação. As chamadas
+seguintes ficam em ~25 ms.
 
 O `pip install` só roda quando o `requirements.txt` muda: o script guarda uma
 cópia dele dentro do venv e compara. Cliques seguintes sobem em segundos.
 
 **Rodando junto com o `cvm-monitor-pro`:** os dois convivem. As portas padrão
-não se cruzam (aqui 8000/5500, lá 8080), cada projeto tem o seu próprio venv
-dentro da própria pasta, e se alguma porta estiver ocupada o script anda para a
-próxima livre em vez de subir por cima de um servidor alheio. Quando a porta da
-API muda, o script reescreve `frontend/js/config.js` e ajusta o `CORS_ORIGINS`
-do backend, então as duas pontas continuam se enxergando.
+não se cruzam (aqui 8000, lá 8080), cada projeto tem o seu próprio venv dentro
+da própria pasta, e se a porta estiver ocupada o script anda para a próxima
+livre em vez de subir por cima de um servidor alheio.
+
+### O painel não sai da máquina
+
+Nenhum arquivo do painel vem da internet. Antes, cada carga de página buscava
+`cdn.tailwindcss.com` (407 KB, que ainda compilava o CSS dentro do navegador) e
+o Chart.js no jsDelivr (205 KB). Hoje:
+
+| | antes | agora |
+|---|---|---|
+| Tailwind | 407 KB do CDN, compilado no navegador | `css/tailwind.css`, **17 KB** (4 KB gzip) |
+| Chart.js | 205 KB do jsDelivr | `js/vendor/chart.umd.min.js`, local |
+| JSON da API | sem compressão | gzip: 94 KB → **13 KB** |
+| Página inteira (index) | ~778 KB na rede | **107 KB**, em ~52 ms |
+
+O CSS agora é **gerado** a partir das classes que o projeto realmente usa, em
+vez de vir o framework inteiro. Quem só quer rodar o painel não precisa de
+nada: o `frontend/css/tailwind.css` está versionado. Quem **mexer nas classes**
+do HTML/JS precisa regerá-lo:
+
+```bat
+frontend\build\gerar_css.bat
+```
+
+O script instala o Tailwind na primeira vez, gera o CSS e roda
+`verificar_classes.py`, que confere se toda classe usada no painel ganhou
+regra. Essa conferência existe por um motivo específico: o build é estático,
+então uma classe montada em tempo de execução (`bg-${cor}-500`) não seria vista
+pelo scanner e o elemento apareceria **sem estilo, sem erro nenhum no console**.
+Hoje as 250 classes do painel são strings completas e todas estão cobertas.
 
 ### Caminho manual
 
@@ -338,22 +380,202 @@ arquivo já baixado em `data/inbox/` e diz qual é no `/health`.
 
 ### 2. Frontend (site)
 
-O front é estático. Sirva a pasta `frontend/` com qualquer servidor:
+Não precisa subir nada: **o `uvicorn` acima já serve o painel** em
+`http://127.0.0.1:8000/`. O `main.py` monta `frontend/` na raiz, depois dos
+routers — `/api`, `/health` e `/docs` continuam sendo resolvidos antes.
 
-```bat
-cd frontend
-python -m http.server 5500
-```
+O `frontend/js/config.js` (gerado pelo `Iniciar.bat`, fora do git) traz
+`window.API_BASE = ""`, ou seja, mesma origem. Preencha-o apenas para apontar
+o painel para uma API em **outra** máquina.
 
-Abra `http://localhost:5500`. Se o backend estiver em outra porta, ajuste
-`window.API_BASE` em `frontend/js/config.js` (é o arquivo que o `Iniciar.bat`
-gera; sem ele, `js/api.js` cai no padrão `http://localhost:8000`).
+Servir a pasta por fora ainda funciona, mas aí o `API_BASE` tem de apontar para
+a porta da API e o `CORS_ORIGINS` do backend precisa liberar a origem do front.
 
 </details>
 
+## Senha do painel
+
+Uma senha só, igual para todo mundo, guardada em `PAINEL_SENHA` no
+`backend/.env` (que não vai para o git). É o mínimo para publicar o painel num
+endereço alcançável: sem ela, quem descobrir a URL vê fluxo de captação e
+resgate por gestora, e o `/admin.html` deixa alterar o corte de classificação
+para todos.
+
+**Isto não é controle de acesso por pessoa.** O log não sabe quem fez o quê, e
+tirar o acesso de alguém significa trocar a senha de todos. É aceitável para
+seis pessoas conhecidas numa mesa; a etapa seguinte é usuário por usuário com
+banco.
+
+### O que fica aberto
+
+Só três coisas, e cada uma por um motivo:
+
+| | |
+|---|---|
+| `/login`, `/logout` | é o próprio portão — trancá-lo seria um laço |
+| `/health` | o systemd, o `Iniciar.bat` e qualquer monitoramento precisam saber se o serviço subiu **antes** de haver sessão |
+| `/api/inbox*` | tem autenticação própria, por token — é a porta das máquinas, não das pessoas |
+
+O `/health` responde **menos** para quem não entrou: só `status` e
+`tem_planilha`. O nome do arquivo carrega a data do relatório da mesa e o corte
+de classificação é parâmetro de negócio; nenhum dos dois precisa ser lido por
+quem passa na porta.
+
+Todo o resto — as quatro telas, o `/docs`, o `/openapi.json`, o JS e o CSS —
+exige sessão.
+
+### Como funciona
+
+Cookie assinado com HMAC-SHA256, `HttpOnly` e `SameSite=lax`. O cookie **não
+guarda segredo nenhum**: só a hora em que expira, mais a assinatura dessa hora.
+Esticar a validade invalida a assinatura.
+
+Escolhemos cookie em vez de HTTP Basic por um motivo concreto: o Basic ocupa o
+cabeçalho `Authorization`, que aqui já é do token de ingestão. O navegador
+passaria a mandar `Basic …` para o `POST /api/inbox`, que espera `Bearer …`, e
+as duas autenticações brigariam. Com cookie, gente usa cookie e máquina usa
+token, sem se atrapalhar.
+
+A assinatura usa `hmac` da biblioteca padrão, e não o `SessionMiddleware` do
+Starlette, porque este depende de `itsdangerous` — pacote que o projeto não
+tem. Mesma escolha feita na ingestão, que lê corpo binário em vez de multipart
+para não puxar `python-multipart`.
+
+### Configuração
+
+```ini
+PAINEL_SENHA=a-senha-da-mesa
+# Assina o cookie. Sem valor, é sorteado a cada partida e todo mundo cai no
+# reinício do serviço. Nunca reaproveite o valor de outra instalação:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+PAINEL_SEGREDO=...
+PAINEL_SESSAO_HORAS=12
+# false em http://127.0.0.1 · true no servidor com HTTPS.
+# Com true em http, o navegador descarta o cookie e o login entra em laço.
+PAINEL_COOKIE_SEGURO=false
+```
+
+**`PAINEL_SENHA` vazio desliga a senha.** É o padrão de propósito: quem roda em
+`127.0.0.1` na própria máquina não deveria ter de digitar senha para ver o
+próprio painel. Em servidor é obrigatório — o app avisa no log ao subir se
+estiver vazio.
+
+### Freio de força bruta
+
+Oito senhas erradas do mesmo IP em cinco minutos travam aquele IP pelo resto da
+janela, inclusive para a senha certa. Não impede um ataque determinado; impede
+o script que dispara milhares de tentativas por minuto, que é o que de fato
+acontece com qualquer coisa exposta na internet.
+
+> **Atrás de NAT corporativo, o freio é compartilhado.** Se as seis pessoas
+> saem pelo mesmo IP público, oito erros de uma travam as outras por até cinco
+> minutos. O contador olha o `X-Forwarded-For`, então atrás do Caddy ele
+> distingue clientes reais — mas não distingue pessoas que dividem a mesma
+> saída de internet.
+
+### O que muda para quem já usava
+
+O `Iniciar.bat` faz login sozinho antes de pré-carregar as bases
+(`backend/scripts/aquecer.py` lê a senha do próprio `.env`, então ela não
+aparece na linha de comando nem no log). O `Coletar_e_Enviar.bat` não é afetado:
+ele usa o token de ingestão, não o cookie.
+
+Nas telas, um botão **Sair** no cabeçalho encerra a sessão. Se o cookie vencer
+com o painel aberto, a primeira chamada que levar 401 manda para o login e traz
+de volta para a mesma tela depois.
+
+## A planilha do dia como recurso de rede
+
+Até agora a planilha só existia dentro da máquina que tem Outlook: o app lia o
+anexo por COM, tecnologia que só existe no Windows. Isso amarrava o projeto a
+seis instalações locais e impedia qualquer servidor.
+
+A direção agora se inverte. A máquina com Outlook **empurra** o arquivo para o
+servidor, e o servidor o publica como recurso HTTP:
+
+| | |
+|---|---|
+| `POST /api/inbox` | recebe a planilha e recalcula o painel |
+| `GET /api/inbox/ultimo` | nome, hora do e-mail, tamanho e `sha256` |
+| `GET /api/inbox/ultimo/arquivo` | o `.xlsx` em si |
+
+Os três exigem `Authorization: Bearer <INGESTAO_TOKEN>`. **Sem token
+configurado, respondem 503** — desligado, e não aberto. Um endpoint de upload
+sem autenticação é pior que endpoint nenhum: quem alcançasse a URL passaria a
+decidir que números a mesa vê.
+
+Com isso, qualquer sistema passa a consumir o mesmo arquivo que o painel usa, e
+o `sha256` prova que é o mesmo:
+
+```bash
+curl -H "Authorization: Bearer SEU_TOKEN" https://SERVIDOR/api/inbox/ultimo
+curl -H "Authorization: Bearer SEU_TOKEN" -o hoje.xlsx \
+     https://SERVIDOR/api/inbox/ultimo/arquivo
+```
+
+### O coletor
+
+`Coletar_e_Enviar.bat` é a única peça que ainda precisa de Windows. Ele lê o
+Outlook, salva o anexo e publica:
+
+```bat
+Coletar_e_Enviar.bat                 rem duplo clique, espera ENTER no fim
+Coletar_e_Enviar.bat /agendado       rem para o Agendador de Tarefas
+Coletar_e_Enviar.bat --destino https://painel.suaempresa.com
+Coletar_e_Enviar.bat --sem-outlook   rem publica o que já está em data/inbox/
+```
+
+Antes de enviar, ele pergunta ao servidor qual planilha está lá e **compara o
+hash**. Se for a mesma, não sobe nem recalcula — o que torna seguro agendar
+várias tentativas por dia.
+
+**Agendamento sugerido** (Agendador de Tarefas do Windows): diariamente às
+08:15, repetindo a cada 1 h por 3 h, com o argumento `/agendado`. A repetição
+cobre o e-mail que atrasa; reenviar o mesmo arquivo não custa nada.
+
+Não marque *"Executar estando o usuário conectado ou não"*. O Outlook precisa
+da sessão aberta para responder ao COM; numa sessão desconectada a leitura
+falha e o script acabaria publicando a planilha da véspera.
+
+O log fica em `data/logs/coletor_AAAA-MM.log`, um por mês, em UTF-8.
+
+### Códigos de saída
+
+O Agendador enxerga o código de retorno, então dá para configurar alerta:
+
+| | |
+|---|---|
+| `0` | publicou, ou o servidor já tinha esta mesma planilha |
+| `1` | erro de configuração — destino ou token faltando |
+| `2` | não achei planilha nenhuma para enviar |
+| `3` | o servidor recusou ou não respondeu |
+
+### O que o servidor recusa
+
+O conteúdo é conferido de verdade, não pela extensão: precisa começar com a
+assinatura de ZIP e conter `xl/workbook.xml`. Um `.xlsx` que na verdade é a
+página de erro do proxy — que acontece em rede corporativa — é rejeitado com
+`422` e a explicação, em vez de quebrar três passos depois dentro do pandas.
+
+O **nome do arquivo é reescrito pelo servidor** a partir do cabeçalho
+`X-Recebido-Em` (a hora do e-mail, não a do upload). Nome vindo do cliente
+nunca toca no disco: é o caminho clássico para escrever fora da pasta.
+
+`INGESTAO_MANTER_ARQUIVOS` (padrão 60) poda as planilhas antigas. Uma por dia
+útil são ~1,2 MB/dia, o que encheria 300 MB de disco em um ano sem ninguém
+perceber.
+
+### Antes de expor isso na internet
+
+O token viaja em texto claro sobre HTTP. **Só publique atrás de HTTPS** — Caddy
+ou Cloudflare Tunnel resolvem com pouca configuração. E note que o painel em si
+(incluindo o `/admin.html`, que altera o corte de classificação para todo
+mundo) continua sem autenticação: isso é aceitável enquanto o servidor escuta
+só em `127.0.0.1`, e deixa de ser no minuto em que existir um link público.
+
 ## Tesourarias — o mapa Tesouraria ↔ Asset
 
-`http://localhost:5500/tesourarias.html`, ou o botão **🏛 Tesourarias**.
+`http://127.0.0.1:8000/tesourarias.html`, ou o botão **🏛 Tesourarias**.
 
 O dashboard responde "quem está captando". Esta tela responde a camada onde o
 negócio de fato acontece, e a diferença é concreta: *"a Asset X compra LF"* não
@@ -408,39 +630,87 @@ o que interessa: um par com metade em 60 dias e metade em 5 anos tem média de
 > na data-base do CDA, com a mesma defasagem proposital do resto do projeto.
 > Apresentar como "o banco emitiu X" seria errado, e a tela diz isso no topo.
 
-## Papel bancário por fundo — LF, CDB e DPGE, papel a papel
+## Papel bancário — LF, CDB e DPGE, nas duas pontas
 
-`http://127.0.0.1:5500/fundos.html`, ou o botão **📄 Papel bancário**.
+`http://127.0.0.1:8000/fundos.html`, ou o botão **📄 Papel bancário**.
 
-Mesma matéria-prima da aba Tesourarias, lida pela ponta oposta e sem agregar
-nada. Lá a pergunta é "quem carrega o meu papel"; aqui é **"o que exatamente
-este fundo tem na carteira"** — emissor por emissor, vencimento por vencimento,
-taxa por taxa.
+Mesma matéria-prima da aba Tesourarias, sem agregar em médias. A tela tem uma
+**chave de visão no cabeçalho** que inverte a leitura sem trocar de página:
 
-A distinção não é cosmética. A tela de tesourarias trabalha com prazo médio,
-spread médio e faixas de vencimento, que respondem "como está o meu funding no
-mercado". Não respondem "quando exatamente vence e a quanto ele comprou", que é
-o que se precisa para ligar oferecendo a rolagem de um papel específico.
+| Visão | A pergunta | A lista | O detalhe |
+|---|---|---|---|
+| **Gestora → Papel** | o que esta casa tem na carteira? | gestoras que carregam papel bancário | blocos por emissor + tipo + mês de vencimento |
+| **Papel → Gestora** | quem tem o meu papel, e vencendo quando? | emissores cujo papel está nos fundos | blocos por gestora + tipo + mês de vencimento |
+
+São a mesma carteira somada por chaves diferentes: o **estoque total é idêntico
+nas duas** (R$ 662,9 bi no CDA de abr/2026), muda só por onde se entra. Uma tela
+só, e não duas páginas, justamente porque duas telas mostrando o mesmo número em
+lugares diferentes é o que faz a mesa desconfiar do dado.
+
+A distinção com a aba Tesourarias continua valendo, e é ela que justifica a
+segunda visão existir: lá tudo é prazo médio, spread médio e faixa de
+vencimento, que respondem "como está o meu funding no mercado". Não respondem
+"quem tem o bloco que vence em fev/27 e a quanto ele comprou", que é o que se
+precisa para ligar oferecendo a rolagem.
 
 | Nível | O que mostra |
 |---|---|
-| Lista | fundos que carregam papel bancário: volume, nº de papéis, nº de emissores, taxa média, prazo, % do PL, o que vence em 12m e o mix LF/CDB/DPGE |
-| Detalhe | **uma linha por papel**: emissor, tipo, data exata de vencimento, mês/ano, taxa e volume |
-| Agenda | quanto vence em cada mês/ano — clicável, filtra a lista de papéis |
-| Emissores | concentração por tesouraria dentro do fundo, também clicável |
+| Lista | volume, nº de papéis, taxa média ponderada, prazo, o que vence em 3m e 12m e o mix LF/CDB/DPGE — por gestora ou por emissor |
+| Vencimento | combo na lista de emissores: abre a lista completa num clique, com o volume do mercado em cada mês, e filtra enquanto se digita — `fev`, `2027`, `fev/27`, `fevereiro 2027` ou `2027-02` levam ao mesmo lugar; setas e Enter escolhem sem tirar a mão do teclado |
+| Detalhe | um bloco por linha: a outra ponta, tipo, mês/ano de vencimento, quantos papéis entraram, taxa e volume |
+| Agenda | quanto vence em cada mês/ano — clicável, e espelhada no mesmo combo de vencimento dentro do dossiê, que ali lista só os meses daquele emissor |
+| Concentração | chips da outra ponta, clicáveis, que filtram a tabela |
+| Pivô | clicar o nome dentro do detalhe **vira a tela do avesso**: do bloco do Bradesco na carteira da Itaú Asset para todos os emissores da Itaú Asset, e vice-versa — sem passar pela lista |
 
-Leitura real de uma linha do detalhe: `BANCO SAFRA · LF · 04/05/2026 · mai/2026
-· CDI + 0,50% · R$ 238,5 mi`.
+### O filtro de vencimento reescreve as colunas
+
+Escolher um mês na lista de emissores não filtra só as linhas: **as colunas
+passam a falar daquele mês**. Volume, papéis, gestoras, taxa e mix viram os do
+mês; prazo e as janelas de 3m/12m saem (são recortes do estoque inteiro e não
+significam nada dentro de um mês só) e entra "% do estoque" — quanto do papel
+daquele emissor vence ali. Os quatro KPIs do topo acompanham, e o quarto vira o
+acumulado: quanto já venceu **até** aquele mês.
+
+Filtrar as linhas e deixar as colunas descrevendo o estoque inteiro seria o
+pior dos mundos: a tela responderia "quem tem papel vencendo em dez/26" com o
+volume de tudo o que o emissor carrega, e a mesa ligaria com o número errado na
+mão. Em dez/2026 são R$ 27,44 bi em 54 emissores — e o Banco do Brasil, que tem
+R$ 45,50 bi de estoque, aparece com os R$ 13,53 bi que vencem no mês, 29,7% do
+que ele tem.
+
+Clicar num emissor com o filtro ligado abre o dossiê **já naquele mês**. A
+agenda por emissor viaja no mesmo payload da lista (2.070 pares emissor × mês,
+46 KB comprimidos), então trocar de mês não custa uma ida ao servidor.
+
+O combo é escrito à mão, e não com `<datalist>`: o nativo não abre num clique,
+cada navegador decide sozinho quando mostrá-lo, e ele não teria onde exibir o
+volume de cada mês — que é metade da informação, porque é o que mostra onde
+está o muro de vencimento antes mesmo de filtrar.
+
+Leitura real na visão invertida: `BRADESCO · dez/2026` mostra R$ 4,79 bi em 36
+blocos, começando por `Banco Bradesco (grupo) · LF · 7 papéis · CDI + 1,12% ·
+R$ 2,70 bi` e `BTG Pactual Asset Management · LF · 12 papéis · CDI + 1,02% ·
+R$ 836,5 mi`.
+
+**Posição intragrupo vem marcada.** A asset do próprio banco costuma ser a maior
+carregadora do papel dele — Banco Bradesco tem 26% do papel Bradesco que está
+nos fundos — e isso não é negócio disputável. As linhas continuam no total, mas
+levam a marca `grupo`, senão a lista de contatos começaria errada.
 
 ### Decisões
 
-**Nada é média.** Cada linha é um papel. Posições idênticas que o administrador
-quebrou em várias linhas são somadas; vencimentos ou taxas diferentes
-permanecem separados, porque juntá-los destruiria exatamente a informação
-procurada. A única média da tela é o `spread_cdi` do resumo do fundo, e ela é
-restrita ao pós-fixado em CDI/Selic — misturar CDI (mediana +0,90%), IPCA
-(+7,30%) e prefixado (12,80%) numa média só produziria um número que não
-descreve nada.
+**O bloco é a unidade, e ele não é uma média.** Uma linha do detalhe é o que a
+mesa negocia: "o bloco do Safra que vence em fev/27". Papéis do mesmo emissor,
+mesmo tipo e mesmo mês somam o volume e trazem a taxa ponderada por ele;
+vencimentos, tipos ou **formas de taxa** diferentes permanecem separados,
+porque juntá-los destruiria exatamente a informação procurada — mediar
+"CDI + 1,35%" com "102% do DI" daria ~51, que a tela mostraria como "51,7% do
+DI": um papel que ninguém emitiu. A coluna *Papéis* diz quantos registros do
+CDA entraram em cada linha.
+
+A única média do resumo é o `spread_cdi`, restrito ao pós-fixado em CDI/Selic —
+misturar CDI (mediana +0,90%), IPCA (+7,30%) e prefixado (12,80%) numa média só
+produziria um número que não descreve nada.
 
 **A taxa aparece na forma em que foi declarada.** `CDI + 0,50%`, `103,5% do
 CDI`, `IPCA + 7,30%` ou a taxa cheia no prefixado. Converter uma na outra
@@ -462,7 +732,7 @@ Medido no CDA de abr/2026: **71.559 papéis de LF/CDB/DPGE, R$ 847,8 bi, em
 
 ## Painel de controle
 
-`http://localhost:5500/admin.html`, ou o botão **⚙ Painel** no cabeçalho.
+`http://127.0.0.1:8000/admin.html`, ou o botão **⚙ Painel** no cabeçalho.
 
 Ele expõe os parâmetros que governam a classificação e, **no mesmo gesto**,
 reclassifica a base inteira:
@@ -712,8 +982,10 @@ Cada fundo da lista mostra o bucket com a carteira que o gerou no *tooltip*
 | GET | `/api/stress?limite=N` | Fundos com resgate anormal |
 | GET | `/api/tesourarias` | Ranking de tesourarias emissoras: estoque, preco, prazo, rolagem |
 | GET | `/api/tesourarias/{raiz}` | Dossie: quem compra, curva de vencimento e quem ainda nao compra |
-| GET | `/api/carteira-bancaria` | Fundos que carregam LF/CDB/DPGE, do maior ao menor |
-| GET | `/api/carteira-bancaria/{cnpj}` | Os papeis de um fundo: emissor, vencimento exato, volume e taxa |
+| GET | `/api/carteira-bancaria` | Gestoras que carregam LF/CDB/DPGE, da maior a menor |
+| GET | `/api/carteira-bancaria/{gestora}` | Os papeis de uma gestora: emissor, mes de vencimento, volume e taxa |
+| GET | `/api/papel-por-emissor` | A mesma carteira pela ponta do emissor: quem carrega o papel dele |
+| GET | `/api/papel-por-emissor/{raiz}` | Quem tem o papel deste emissor em carteira, por gestora, tipo e mes |
 | GET | `/api/fonte` | Arquivo em uso e campos indisponíveis |
 | POST | `/api/admin/refresh` | Re-varre o Outlook e recalcula o pipeline (recarrega a fonte) |
 | GET | `/api/admin/parametros` | Parametros editaveis e o retrato atual da classificacao |

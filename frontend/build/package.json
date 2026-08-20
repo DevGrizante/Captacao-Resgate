@@ -1,0 +1,12 @@
+{
+  "name": "captacao-resgate-css",
+  "private": true,
+  "description": "Build do CSS do painel. Substitui o cdn.tailwindcss.com, que baixava 407 KB e compilava no navegador a cada carga.",
+  "scripts": {
+    "build": "tailwindcss -c tailwind.config.js -i tailwind.entrada.css -o ../css/tailwind.css --minify",
+    "watch": "tailwindcss -c tailwind.config.js -i tailwind.entrada.css -o ../css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

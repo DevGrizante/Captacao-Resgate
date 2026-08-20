@@ -1,5 +1,4 @@
 import warnings
-import pandas as pd
 import requests
 
 def test_warning():

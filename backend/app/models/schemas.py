@@ -531,6 +531,118 @@ class FundoPapelBancarioDetalhe(BaseModel):
     por_emissor: list[TesourariaNaCarteira]
 
 
+# ---------- a mesma carteira lida pela ponta do EMISSOR ----------
+# A tela de papel bancário tem duas leituras da MESMA matéria-prima. Acima, a
+# pergunta é "o que esta casa tem na carteira?". Abaixo, a inversa: "quem tem
+# o meu papel, e vencendo quando?" — que é a pergunta de quem vai ligar
+# oferecendo a rolagem de um bloco específico.
+#
+# Não é a tela de Tesourarias com outro nome: lá tudo é média (prazo médio,
+# spread médio, faixas de prazo), e média não diz com quem falar em fev/27.
+# Aqui o eixo é o mês de vencimento, e cada linha é uma gestora.
+class EmissorPapelBancario(BaseModel):
+    """Um EMISSOR, resumido pelo papel dele que está nas carteiras.
+
+    Espelha `FundoPapelBancario` de propósito: as duas visões da tela mostram
+    os mesmos KPIs e a mesma barra de mix, e campos com nomes diferentes para a
+    mesma conta obrigariam a tela a ter dois caminhos para cada número.
+    """
+    raiz: str                           # raiz do CNPJ — a chave estável
+    emissor: str
+    gestoras: int                       # quantas casas carregam este papel
+    fundos: int
+    valor: float                        # R$ em LF + CDB + DPGE, somado
+    posicoes: int
+    # Fatia deste emissor no papel bancário de todo o universo. É o "tamanho
+    # relativo" que o `pct_pl` da gestora não tem equivalente aqui — um emissor
+    # não tem PL nesta base.
+    share_pct: Optional[float] = None
+    spread_cdi: Optional[float] = None
+    prazo_dias: Optional[float] = None
+    valor_venc_3m: float = 0.0
+    valor_venc_12m: float = 0.0
+    pct_lf: Optional[float] = None
+    pct_cdb: Optional[float] = None
+    pct_dpge: Optional[float] = None
+    # Quanto do estoque está na asset do próprio grupo. Não é negócio
+    # disputável, e sem esta marca o maior "cliente" de um banco costuma ser
+    # ele mesmo — o que faria a lista de contatos começar errada.
+    pct_ligado: Optional[float] = None
+    carteira_data: Optional[str] = None
+
+
+class MesDoEmissor(BaseModel):
+    """Uma fatia da agenda de um emissor: o que vence naquele mês, e por quem.
+
+    Existe para a LISTA poder ser filtrada por vencimento sem ida ao servidor.
+    Filtrar a lista e deixar as colunas descrevendo o estoque inteiro seria
+    mentira de tela: "quem tem papel vencendo em dez/26" com o volume total do
+    emissor ao lado faz a mesa ligar com o número errado na mão. Com esta
+    quebra, as colunas passam a falar do mês escolhido.
+
+    São 2.070 pares (emissor, mês) no CDA de abr/2026 — cabe inteiro no mesmo
+    payload da lista, e a troca de mês vira instantânea.
+    """
+    mes: str                            # "2027-02"; vazio é papel perpétuo
+    valor: float
+    posicoes: int
+    gestoras: int                       # quantas casas têm papel vencendo aqui
+    taxa: Optional[float] = None        # spread sobre CDI, ponderado, só pós-fixado
+    pct_lf: Optional[float] = None
+    pct_cdb: Optional[float] = None
+    pct_dpge: Optional[float] = None
+
+
+class EmissorPapelBancarioNaLista(EmissorPapelBancario):
+    """O resumo do emissor mais a agenda dele, que só a lista precisa.
+
+    Subclasse, e não um campo opcional no resumo, porque o mesmo objeto é
+    servido dentro do detalhe — onde a agenda já vem completa em `por_mes` e
+    repeti-la seria payload jogado fora. O Pydantic serializa pelo tipo
+    DECLARADO do campo, então o detalhe descarta `meses` sozinho.
+    """
+    meses: list[MesDoEmissor] = []
+
+
+class CarregadorPapel(BaseModel):
+    """Uma linha do detalhe do emissor: gestora + tipo + mês de vencimento + taxa.
+
+    O espelho de `PosicaoBancaria`. Mesma consolidação, mesma regra da forma da
+    taxa — o que muda é o que fica fixo (o emissor) e o que varia (a gestora).
+    """
+    gestora: str
+    instrumento: str                    # lf | cdb | dpge
+    mes_venc: str                       # "2027-02" — o eixo da agenda
+    indexador: str
+    taxa: Optional[float] = None
+    forma: Optional[str] = None
+    valor: float
+    papeis: int = 1
+    fundos: int = 1                     # quantos veículos da casa entraram aqui
+    quantidade: Optional[float] = None
+    pct_ligado: Optional[float] = None
+    ligado: bool = False
+
+
+class GestoraNoEmissor(BaseModel):
+    """Uma casa dentro do estoque de um emissor — o chip de concentração."""
+    gestora: str
+    valor: float
+    pct_do_emissor: Optional[float] = None
+    spread: Optional[float] = None
+    valor_venc_12m: float = 0.0
+    ligado: bool = False
+
+
+class EmissorPapelBancarioDetalhe(BaseModel):
+    """O que aparece ao clicar num emissor: quem carrega, e vencendo quando."""
+    emissor: EmissorPapelBancario
+    posicoes: list[CarregadorPapel]
+    por_mes: list[VencimentoMes]
+    # Concentração por gestora dentro deste emissor, já ordenada.
+    por_gestora: list[GestoraNoEmissor]
+
+
 # ---------- painel de controle (área admin) ----------
 class ParametroInfo(BaseModel):
     """Um parâmetro editável, com a régua junto — o painel monta o campo daqui.

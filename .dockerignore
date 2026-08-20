@@ -1,0 +1,57 @@
+# =============================================================================
+#  .dockerignore -- Captacao e Resgate
+#  Fica na RAIZ porque a raiz e o contexto de build das duas imagens (api e
+#  web), conforme docker-compose.yml. Tudo listado aqui nunca e enviado ao
+#  daemon do Docker: o contexto cai de ~40 MB para menos de 500 KB, e o build
+#  deixa de ser invalidado toda vez que um parquet de cache muda.
+# =============================================================================
+
+# --- Dados (o item mais pesado do repositorio) -------------------------------
+# data/cache tem parquet e um zip de 24 MB; data/inbox tem os anexos xlsx do
+# e-mail, que sao dado de cliente. Nada disso entra em imagem: no compose,
+# data/ e montado como volume em runtime.
+data/
+
+# --- Python ------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Segredos ----------------------------------------------------------------
+# O .env real chega pelo `env_file` do compose, em runtime -- jamais assado
+# dentro da imagem (quem tiver a imagem teria o token junto).
+.env
+.env.docker
+!.env.example
+!.env.docker.example
+
+# --- config.js gerado --------------------------------------------------------
+# O arquivo local aponta para a porta da maquina do desenvolvedor
+# (127.0.0.1:8001). Dentro do container ele e regerado apontando para a
+# mesma origem; se o local viesse junto, o painel falaria com o host errado.
+frontend/js/config.js
+
+# --- Git, docs e utilitarios de desenvolvimento ------------------------------
+.git/
+.gitignore
+.github/
+*.md
+Iniciar.bat
+test_fixes.py
+
+# --- Editores / SO -----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Artefatos Docker --------------------------------------------------------
+# Evita que editar o proprio Dockerfile invalide as camadas de COPY.
+docker-compose*.yml
+**/Dockerfile
+.dockerignore

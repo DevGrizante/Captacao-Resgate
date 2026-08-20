@@ -1,0 +1,73 @@
+#cloud-config
+# =============================================================================
+#  Primeiro boot de uma VM.Standard.E2.1.Micro (1 GB de RAM).
+#
+#  Anexado em "Initialization script" na criação da instância, ou pelo
+#  --user-data-file do criar-e2micro.sh.
+#
+#  O QUE ELE FAZ, E POR QUÊ CADA COISA
+#
+#   1. Cria 4 GB de swap. Em 1 GB de RAM isto não é refinamento: a carga que
+#      reconstrói o cache da CVM chega a 2.078 MB medidos. Sem swap, o kernel
+#      mata o processo (OOM) e o serviço morre em silêncio; com swap, a mesma
+#      carga completa — devagar, mas completa. É a diferença entre "demorou"
+#      e "o painel caiu e ninguém sabe por quê".
+#
+#   2. Reduz o `swappiness`. O padrão do Linux é 60, que manda o kernel usar
+#      swap com folga de RAM ainda disponível. Aqui o swap é rede de segurança,
+#      não área de trabalho: 10 faz ele só entrar quando a RAM aperta de fato.
+#
+#   3. Abre 80 e 443 no iptables e SALVA. A imagem Ubuntu da Oracle vem com
+#      regras que barram tudo além do SSH, e a Security List da console é só
+#      metade do caminho. Sem o save, as regras somem no próximo reinício.
+#
+#   4. Instala só o essencial. Cada pacote a mais é RAM e disco que não sobram.
+#      Nada de Docker: o daemon consome 100-150 MB só de existir, o que em
+#      1 GB é 15% da máquina para não fazer nada.
+# =============================================================================
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - python3-venv
+  - python3-pip
+  - iptables-persistent
+  - caddy
+
+write_files:
+  # sysctl: o swap é rede de segurança, não extensão da RAM.
+  - path: /etc/sysctl.d/99-painel.conf
+    content: |
+      vm.swappiness=10
+      vm.vfs_cache_pressure=50
+
+runcmd:
+  # --- 1) Swap de 4 GB ------------------------------------------------------
+  # fallocate falha em alguns sistemas de arquivo; o dd é o caminho que sempre
+  # funciona, só mais lento. `|| ` encadeia os dois sem abortar o boot.
+  - |
+    if [ ! -f /swapfile ]; then
+      fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+  - sysctl --system
+
+  # --- 2) Firewall da máquina ----------------------------------------------
+  - iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+  - iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+  - netfilter-persistent save
+
+  # --- 3) Marca que terminou -----------------------------------------------
+  # O cloud-init leva alguns minutos. Este arquivo é como saber se ele já
+  # acabou, sem ficar adivinhando pelo log.
+  - touch /var/log/painel-cloud-init-pronto
+
+final_message: |
+  Pronto em $UPTIME segundos.
+  Confira o swap com:  free -h
+  Depois:              git clone ... ~/painel && bash ~/painel/deploy/instalar.sh

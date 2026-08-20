@@ -3,24 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Papel bancário por gestora</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="css/styles.css">
+<title>Papel bancário · gestora e emissor</title>
+<!-- CSS gerado por build/gerar_css.bat a partir das classes realmente
+     usadas. Substitui o cdn.tailwindcss.com (407 KB baixados e compilados
+     no navegador a cada carga) por 17 KB servidos da propria maquina. -->
+<link rel="stylesheet" href="css/tailwind.css?v=21">
+<link rel="stylesheet" href="css/styles.css?v=21">
 </head>
 <body class="min-h-screen">
 
 <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-40">
-  <div class="max-w-[1500px] mx-auto px-6 py-3 flex items-center justify-between">
+  <div class="max-w-[1500px] mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
     <div class="flex items-center gap-3">
       <div class="w-8 h-8 rounded bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center font-bold">L</div>
       <div>
-        <h1 class="text-sm font-semibold">Papel bancário por gestora · LF, CDB e DPGE</h1>
+        <h1 class="text-sm font-semibold" id="hdr-titulo">Papel bancário por gestora · LF, CDB e DPGE</h1>
         <p class="text-xs text-slate-500" id="hdr-meta">Carregando…</p>
       </div>
     </div>
+
+    <!-- A chave das duas leituras. Fica no cabeçalho, e não dentro do card da
+         tabela, porque ela muda a tela inteira: título, KPIs e detalhe. -->
+    <div class="flex items-center gap-2">
+      <span class="text-[10px] uppercase tracking-wider text-slate-500 hidden md:inline">Visão</span>
+      <div class="visao-slider" id="visao-slider" data-ativo="gestora" role="tablist" aria-label="Direção da leitura">
+        <span class="visao-knob" aria-hidden="true"></span>
+        <button type="button" class="visao-opcao" data-visao="gestora" role="tab" aria-selected="true"
+                title="Escolho a gestora e vejo o que ela tem em carteira">
+          Gestora <span class="visao-seta">→</span> Papel
+        </button>
+        <button type="button" class="visao-opcao" data-visao="emissor" role="tab" aria-selected="false"
+                title="Escolho o emissor e o vencimento, e vejo quem tem o papel em carteira">
+          Papel <span class="visao-seta">→</span> Gestora
+        </button>
+      </div>
+    </div>
+
     <div class="flex items-center gap-2">
       <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Dashboard</a>
       <a href="tesourarias.html" class="pill px-3 py-1.5 text-xs rounded-md bg-amber-700/40 hover:bg-amber-700/60 border border-amber-800/50">🏛 Tesourarias</a>
+      <form method="post" action="/logout" class="inline">
+        <button type="submit" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200"
+                title="Encerrar a sessão neste navegador">Sair</button>
+      </form>
+
     </div>
   </div>
 </header>
@@ -32,7 +58,10 @@
     <span id="aviso-resumo">—</span>
     <button type="button" class="underline underline-offset-2 hover:text-amber-100 ml-1" id="aviso-toggle">ver detalhes</button>
     <div class="hidden space-y-1 mt-2 pt-2 border-t border-amber-900/40" id="aviso-detalhe">
-      <div><strong>Cada linha do detalhe é um bloco consolidado:</strong> mesmo emissor, mesmo tipo e
+      <div><strong>São duas leituras da mesma carteira.</strong> <em>Gestora → Papel</em> responde "o que
+        esta casa tem"; <em>Papel → Gestora</em> responde "quem tem o meu papel, e vencendo quando".
+        O estoque total é o mesmo nas duas — muda só por onde se entra.</div>
+      <div id="aviso-bloco"><strong>Cada linha do detalhe é um bloco consolidado:</strong> mesmo emissor, mesmo tipo e
         mesmo mês de vencimento viram uma linha só, com o volume somado e a taxa média ponderada pelo
         volume. A coluna <em>Papéis</em> diz quantos registros entraram na linha.</div>
       <div><strong>A taxa é a declarada pelo fundo</strong> no CDA da data-base, e aparece na forma em que
@@ -50,6 +79,9 @@
       <div><strong>Prazo e "vence em 12 meses" contam a partir de hoje</strong>, e não da data-base da
         carteira. Como o universo passou a ser "o que está vivo agora", contar de abr/2026 faria
         "12 meses" significar 8 meses à frente de quem lê a tela.</div>
+      <div><strong>Posição intragrupo vem marcada.</strong> A asset do próprio banco costuma ser a maior
+        carregadora do papel dele, e isso não é negócio disputável. As linhas continuam no total —
+        elas são estoque de verdade — mas levam a marca <em>grupo</em>.</div>
     </div>
   </div>
 </div>
@@ -63,7 +95,8 @@
     <div class="card rounded-lg p-4" id="kpi-venc"></div>
   </section>
 
-  <section class="card rounded-lg overflow-hidden">
+  <!-- ===== Visão 1: gestora -> papel ===================================== -->
+  <section class="card rounded-lg overflow-hidden" id="secao-gestora">
     <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
       <div>
         <h2 class="text-sm font-semibold">Gestoras que carregam papel bancário</h2>
@@ -101,17 +134,64 @@
     </div>
   </section>
 
+  <!-- ===== Visão 2: papel -> gestora ===================================== -->
+  <section class="card rounded-lg overflow-hidden hidden" id="secao-emissor">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h2 class="text-sm font-semibold">Emissores com papel na mão dos fundos</h2>
+        <p class="text-[10px] text-slate-500" id="secao-emissor-sub">Clique num emissor para ver, mês a mês, quem tem o papel em carteira, quanto e a que taxa</p>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <input type="text" id="busca-e" placeholder="Buscar emissor..."
+          class="bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-blue-600">
+        <!-- Vencimento é o outro eixo desta visão, então ele fica na lista e
+             não só dentro do dossiê. Campo com datalist em vez de <select>:
+             são 150 meses, e digitar "fev/27" é mais rápido do que rolar até
+             ele. Escolher da lista e digitar produzem o mesmo valor. -->
+        <span class="text-slate-500">Vence em:</span>
+        <span class="combo">
+          <input type="text" id="venc-e" placeholder="todos" autocomplete="off"
+            role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="venc-e-lista"
+            class="bg-slate-900 border border-slate-800 rounded pl-2 pr-6 py-1.5 text-xs w-32 focus:outline-none focus:border-blue-600">
+          <button type="button" id="venc-e-botao" class="combo-botao" aria-label="abrir a lista de vencimentos">▾</button>
+        </span>
+        <ul id="venc-e-lista" class="combo-lista hidden" role="listbox" aria-label="vencimentos"></ul>
+        <span class="text-slate-500">Ordenar:</span>
+        <select id="ordenar-e" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
+          <option value="valor">Volume</option>
+          <option value="valor_venc_3m">Vencendo em 3m</option>
+          <option value="valor_venc_12m">Vencendo em 12m</option>
+          <option value="spread_cdi">Taxa</option>
+          <option value="gestoras">Nº de gestoras</option>
+          <option value="posicoes">Nº de papéis</option>
+        </select>
+      </div>
+    </div>
+    <div class="max-h-[600px] overflow-y-auto scrollbar">
+      <table class="w-full text-xs">
+        <!-- As colunas mudam quando um vencimento é escolhido: filtrar as
+             linhas e deixar o volume descrevendo o estoque inteiro faria a mesa
+             ligar com o número errado na mão. Ver `renderTabelaEmissores`. -->
+        <thead><tr class="text-left text-slate-400" id="thead-e"></tr></thead>
+        <tbody id="tabela-e"></tbody>
+      </table>
+    </div>
+  </section>
+
   <footer class="text-xs text-slate-600 text-center py-4 border-t border-slate-800/50" id="rodape">
     Captação e Resgate · Crédito Privado
   </footer>
 </main>
 
-<!-- Detalhe da gestora -->
+<!-- Detalhe. O painel é UM só para as duas visões: a estrutura é a mesma
+     (KPIs, agenda de vencimentos, concentração e a tabela de blocos) e só
+     troca o que fica fixo e o que varia. Dois painéis separados seriam duas
+     manutenções para o mesmo desenho. -->
 <div id="dossie-overlay" class="fixed inset-0 bg-black/50 z-40 hidden opacity-0" onclick="fecharDossie()"></div>
 <aside id="dossie" class="dossie-closed fixed top-0 right-0 h-full w-full max-w-[900px] bg-slate-950 border-l border-slate-800 z-50 flex flex-col">
   <div class="p-5 border-b border-slate-800 flex items-start justify-between">
     <div class="min-w-0">
-      <p class="text-[10px] uppercase tracking-wider text-slate-500">Carteira de papel bancário</p>
+      <p class="text-[10px] uppercase tracking-wider text-slate-500" id="d-rotulo">Carteira de papel bancário</p>
       <h2 class="text-base font-semibold mt-0.5 truncate" id="d-nome">—</h2>
       <p class="text-xs text-slate-500 mt-1" id="d-meta">—</p>
     </div>
@@ -122,7 +202,7 @@
 
     <div>
       <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
-        Agenda de vencimentos <span class="text-slate-600 normal-case">· por mês/ano</span>
+        Agenda de vencimentos <span class="text-slate-600 normal-case">· por mês/ano · clique para filtrar</span>
       </p>
       <div class="card rounded-lg p-3 overflow-x-auto scrollbar">
         <div class="flex items-end gap-1 h-24 min-w-max" id="d-agenda"></div>
@@ -131,7 +211,7 @@
     </div>
 
     <div>
-      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+      <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2" id="d-conc-rotulo">
         Concentração por emissor
       </p>
       <div class="flex flex-wrap gap-1.5" id="d-emissores"></div>
@@ -140,11 +220,21 @@
     <div>
       <div class="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
         <p class="text-[11px] uppercase tracking-wider text-slate-500">
-          Papéis em carteira <span class="text-slate-600 normal-case" id="d-papeis-n"></span>
+          <span id="d-papeis-rotulo">Papéis em carteira</span>
+          <span class="text-slate-600 normal-case" id="d-papeis-n"></span>
         </p>
         <div class="flex items-center gap-2 text-[11px]">
           <input type="text" id="d-filtro" placeholder="filtrar emissor..."
             class="bg-slate-900 border border-slate-800 rounded px-2 py-1 w-40 focus:outline-none focus:border-blue-600">
+          <!-- O mesmo filtro que o clique na barra aplica. Com 78 meses na
+               agenda, achar "fev/27" no meio das barras é mira; aqui é escolha. -->
+          <span class="combo">
+            <input type="text" id="d-mes" placeholder="todo vencimento" autocomplete="off"
+              role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="d-mes-lista"
+              class="bg-slate-900 border border-slate-800 rounded pl-2 pr-6 py-1 w-36 focus:outline-none focus:border-blue-600">
+            <button type="button" id="d-mes-botao" class="combo-botao" aria-label="abrir a lista de vencimentos">▾</button>
+          </span>
+          <ul id="d-mes-lista" class="combo-lista hidden" role="listbox" aria-label="vencimentos deste emissor"></ul>
           <select id="d-tipo" class="bg-slate-900 border border-slate-800 rounded px-2 py-1 focus:outline-none">
             <option value="">Todos os tipos</option>
             <option value="lf">LF</option>
@@ -155,25 +245,17 @@
             <option value="vencimento">Por vencimento</option>
             <option value="valor">Por volume</option>
             <option value="spread">Por taxa</option>
-            <option value="emissor">Por emissor</option>
+            <option value="emissor">Por nome</option>
           </select>
         </div>
       </div>
       <div class="card rounded-lg overflow-hidden">
-        <!-- overflow-x como rede de segurança: com a coluna do emissor presa
+        <!-- overflow-x como rede de segurança: com a coluna do nome presa
              a tabela cabe, mas numa janela estreita ela rola dentro do card em
              vez de empurrar o painel. -->
         <div class="max-h-[420px] overflow-y-auto overflow-x-auto scrollbar">
           <table class="w-full text-xs">
-            <thead><tr class="text-left text-slate-500">
-              <th class="px-3 py-2 font-medium text-center">Tipo</th>
-              <th class="px-3 py-2 font-medium">Emissor</th>
-              <th class="px-3 py-2 font-medium text-center">Mês/ano</th>
-              <th class="px-3 py-2 font-medium text-center" title="Quantos papéis foram somados nesta linha">Papéis</th>
-              <th class="px-3 py-2 font-medium text-right">Taxa</th>
-              <th class="px-3 py-2 font-medium text-right">Volume</th>
-              <th class="px-3 py-2 font-medium text-right">%</th>
-            </tr></thead>
+            <thead><tr class="text-left text-slate-500" id="d-thead"></tr></thead>
             <tbody id="d-papeis"></tbody>
           </table>
         </div>
@@ -182,8 +264,8 @@
   </div>
 </aside>
 
-<script src="js/config.js?v=14"></script>
-<script src="js/api.js?v=14"></script>
-<script src="js/fundos.js?v=14"></script>
+<script src="js/config.js?v=21" defer></script>
+<script src="js/api.js?v=21" defer></script>
+<script src="js/fundos.js?v=21" defer></script>
 </body>
 </html>

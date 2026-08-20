@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrar · Captação · Crédito Privado</title>
+<!--
+  Esta página é AUTOCONTIDA de propósito: nada de css/ ou js/ externos.
+
+  Tudo o que ela referenciasse teria de ser liberado antes do login, e cada
+  arquivo público é mais superfície exposta a quem ainda não provou nada. Como
+  é uma tela só, com um campo, o CSS inline sai mais barato que a exceção no
+  portão.
+-->
+<style>
+  :root {
+    --fundo: #0a0e1a;
+    --cartao: #111827;
+    --borda: #1f2937;
+    --texto: #e5e7eb;
+    --apagado: #6b7280;
+    --azul: #2563eb;
+    --azul-claro: #3b82f6;
+    --erro: #f87171;
+    --erro-fundo: rgba(239, 68, 68, .12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--fundo);
+    color: var(--texto);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .cartao {
+    width: 100%;
+    max-width: 360px;
+    background: var(--cartao);
+    border: 1px solid var(--borda);
+    border-radius: 10px;
+    padding: 32px 28px;
+  }
+  .marca {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-bottom: 26px;
+  }
+  .logo {
+    width: 34px; height: 34px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #3b82f6, #4f46e5);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; color: #fff;
+    flex-shrink: 0;
+  }
+  h1 { font-size: 14px; font-weight: 600; margin: 0; line-height: 1.3; }
+  .marca p { margin: 2px 0 0; font-size: 11.5px; color: var(--apagado); }
+
+  label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--apagado);
+    margin-bottom: 7px;
+    font-weight: 500;
+  }
+  input[type="password"] {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: 11px 13px;
+    color: var(--texto);
+    font-size: 14px;
+    font-family: inherit;
+    transition: border-color .15s ease;
+  }
+  input[type="password"]:focus {
+    outline: none;
+    border-color: var(--azul-claro);
+  }
+  button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 11px;
+    background: var(--azul);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background .15s ease;
+  }
+  button:hover { background: var(--azul-claro); }
+  button:focus-visible { outline: 2px solid var(--azul-claro); outline-offset: 2px; }
+
+  .erro {
+    background: var(--erro-fundo);
+    border: 1px solid rgba(239, 68, 68, .3);
+    color: var(--erro);
+    font-size: 12.5px;
+    line-height: 1.45;
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin-bottom: 18px;
+  }
+  .erro:empty { display: none; }
+
+  .rodape {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--borda);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--apagado);
+  }
+</style>
+</head>
+<body>
+
+<form class="cartao" method="post" action="/login">
+  <div class="marca">
+    <div class="logo">C</div>
+    <div>
+      <h1>Captação · Crédito Privado</h1>
+      <p>Acesso restrito à mesa</p>
+    </div>
+  </div>
+
+  <div class="erro">{{ERRO}}</div>
+
+  <label for="senha">Senha</label>
+  <!-- autofocus para quem chega aqui já poder digitar; o gerenciador de senhas
+       do navegador reconhece current-password e oferece o preenchimento. -->
+  <input type="password" id="senha" name="senha" autocomplete="current-password"
+         autofocus required>
+  <input type="hidden" name="proximo" value="{{PROXIMO}}">
+
+  <button type="submit">Entrar</button>
+
+  <p class="rodape">
+    A senha é a mesma para toda a mesa. A sessão dura 12 horas neste navegador.
+  </p>
+</form>
+
+</body>
+</html>

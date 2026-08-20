@@ -6,6 +6,9 @@ from fastapi import APIRouter, HTTPException, Query
 from app.models.schemas import (
     DashboardResponse,
     DossieResponse,
+    EmissorPapelBancario,
+    EmissorPapelBancarioDetalhe,
+    EmissorPapelBancarioNaLista,
     FonteInfo,
     MoverGestora,
     StressFundo,
@@ -125,6 +128,47 @@ def get_carteira_bancaria_gestora(gestora: str):
         raise HTTPException(
             status_code=404,
             detail=f"Gestora '{gestora}' não tem papel bancário nesta carga.",
+        )
+    return resp
+
+
+@router.get("/papel-por-emissor", response_model=list[EmissorPapelBancarioNaLista])
+def get_papel_por_emissor(
+    limite: int = Query(1000, ge=1, le=5000),
+    busca: str = Query("", max_length=120),
+):
+    """A carteira bancária lida pela ponta do EMISSOR: quem carrega o papel dele.
+
+    A visão inversa de `/carteira-bancaria`, sobre exatamente a mesma matéria-
+    prima — a tela alterna entre as duas sem recarregar. Aqui a linha é o
+    emissor: quanto do papel dele está nos fundos, em quantas casas, a que
+    preço, com que agenda de vencimento.
+
+    Não substitui `/tesourarias`: lá o recorte é o par fundo × tesouraria já
+    resumido em médias e faixas de prazo. Aqui o eixo é o mês de vencimento, e
+    o detalhe desce até o bloco que a mesa negocia.
+
+    O caminho não é `/carteira-bancaria/emissores` de propósito: essa rota
+    colidiria com `/carteira-bancaria/{gestora}`, e a ordem de declaração
+    passaria a ser o que separa um payload do outro — frágil demais para uma
+    diferença invisível na URL.
+    """
+    return pipeline.papel_por_emissor(limite, busca)
+
+
+@router.get("/papel-por-emissor/{raiz}", response_model=EmissorPapelBancarioDetalhe)
+def get_papel_por_emissor_detalhe(raiz: str):
+    """Quem tem o papel deste emissor em carteira, por gestora + tipo + mês.
+
+    `raiz` é a raiz do CNPJ do emissor (8 dígitos) — a mesma chave da tela de
+    tesourarias, porque o nome vem como texto livre e a mesma casa aparece com
+    dezenas de grafias.
+    """
+    resp = pipeline.papel_por_emissor_detalhe(raiz)
+    if resp is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Emissor '{raiz}' não tem papel em carteira nesta carga.",
         )
     return resp
 

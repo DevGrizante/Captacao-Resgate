@@ -1,0 +1,65 @@
+# =============================================================================
+#  Caddy — HTTPS e proxy para o painel
+#
+#  Instalar:
+#      sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#      sudo nano /etc/caddy/Caddyfile     # trocar o domínio
+#      sudo systemctl reload caddy
+#
+#  O Caddy emite e renova o certificado sozinho, mas só consegue se o domínio
+#  JÁ estiver apontando para o IP público desta máquina. Aponte o registro A e
+#  espere propagar antes de recarregar.
+# =============================================================================
+
+painel.suaempresa.com {
+	# O uvicorn escuta só no loopback; este é o único caminho de fora para dentro.
+	reverse_proxy 127.0.0.1:8000 {
+		# A primeira carga do dia passa de nove minutos. O padrão do Caddy
+		# cortaria a resposta no meio e o painel mostraria erro de rede sem
+		# motivo real.
+		transport http {
+			response_header_timeout 20m
+			read_timeout 20m
+		}
+	}
+
+	# A planilha do coletor tem ~1,2 MB e chega inteira no corpo do POST.
+	# O limite existe para impedir que um corpo gigante consuma a memória do
+	# servidor — 30 MB dá folga de sobra sobre o teto de 25 MB da aplicação.
+	request_body {
+		max_size 30MB
+	}
+
+	# --- Cabeçalhos de segurança ---------------------------------------------
+	header {
+		# HSTS: depois da primeira visita, o navegador se recusa a usar http
+		# neste domínio. Ative só quando o HTTPS estiver funcionando — voltar
+		# atrás leva o tempo do max-age.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Não anuncia o servidor.
+		-Server
+	}
+
+	# O log ajuda a distinguir "ninguém acessou" de "acessaram e deu erro".
+	log {
+		output file /var/log/caddy/painel.log {
+			roll_size 10MB
+			roll_keep 5
+		}
+	}
+}
+
+# -----------------------------------------------------------------------------
+# ENQUANTO NÃO HOUVER DOMÍNIO
+#
+# Para testar por IP antes de configurar o DNS, comente o bloco acima e use o
+# de baixo. Atenção: é HTTP puro, então o cookie de sessão trafega em texto
+# claro e PAINEL_COOKIE_SEGURO precisa ficar `false` no .env. Serve para
+# conferir que a aplicação subiu — não para uso de verdade.
+#
+# :80 {
+# 	reverse_proxy 127.0.0.1:8000
+# }

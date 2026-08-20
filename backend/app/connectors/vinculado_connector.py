@@ -46,6 +46,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.config import settings
 from app.connectors.base import DataConnector
 from app.services import outlook_inbox
 
@@ -189,11 +190,22 @@ class VinculadoConnector(DataConnector):
 
     def carregar_fundos(self) -> list[dict]:
         if not self.disponivel():
-            raise FileNotFoundError(
-                "Nenhum arquivo vinculado_*.xlsx disponível. Abra o Outlook (o "
-                "e-mail fica na pasta 'Quantum') e chame POST /api/admin/refresh, "
-                "ou copie o anexo manualmente para data/inbox/."
-            )
+            # A mensagem muda conforme o lado: numa máquina com Outlook o
+            # caminho é reler a caixa; num servidor não existe Outlook nenhum, e
+            # mandar o usuário abri-lo seria uma pista falsa.
+            if settings.OUTLOOK_ENABLED:
+                caminho = (
+                    "Abra o Outlook (o e-mail fica na pasta "
+                    f"'{settings.OUTLOOK_PASTA}') e chame POST /api/admin/refresh, "
+                    "ou copie o anexo manualmente para data/inbox/."
+                )
+            else:
+                caminho = (
+                    "Este servidor não lê o Outlook. A planilha precisa ser "
+                    "enviada pela rede: rode o Coletar_e_Enviar.bat na máquina "
+                    "que recebe o e-mail, ou faça POST /api/inbox com o .xlsx."
+                )
+            raise FileNotFoundError(f"Nenhuma planilha recebida ainda. {caminho}")
 
         logger.info("Lendo %s", self.caminho.name)
         self.recebido_em = datetime.fromtimestamp(self.caminho.stat().st_mtime)

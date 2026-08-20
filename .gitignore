@@ -24,8 +24,13 @@ data/relatorios/
 data/parametros.json
 data/parametros.json.tmp
 
-# Gerado pelo Iniciar.bat com a porta real em que a API subiu.
-frontend/js/config.js
+# frontend/js/config.js NAO fica mais aqui.
+#
+# Ele era ignorado porque guardava a porta da maquina ("http://127.0.0.1:8001").
+# Desde que a API passou a servir o painel, o conteudo virou o mesmo em todo
+# lugar: API_BASE vazio, ou seja, mesma origem. Ignorado, ele faltava no clone
+# do servidor, o /js/config.js dava 404 e o painel caia no padrao antigo -
+# "localhost:8000", que no navegador do usuario e a maquina DELE.
 
 # IDE
 .vscode/
@@ -34,3 +39,15 @@ frontend/js/config.js
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker
+.env.docker
+
+# Dependencias do build do CSS. So quem MUDA classe do painel precisa delas;
+# o CSS gerado (frontend/css/tailwind.css) esta versionado, entao quem so quer
+# rodar o painel nao precisa de Node.
+frontend/build/node_modules/
+frontend/build/package-lock.json
+
+# Log do coletor diario. Estado local da maquina que roda a coleta.
+data/logs/

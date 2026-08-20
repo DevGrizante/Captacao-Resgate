@@ -4,8 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Painel de controle · Captação</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="css/styles.css">
+<!-- CSS gerado por build/gerar_css.bat a partir das classes realmente
+     usadas. Substitui o cdn.tailwindcss.com (407 KB baixados e compilados
+     no navegador a cada carga) por 17 KB servidos da propria maquina. -->
+<link rel="stylesheet" href="css/tailwind.css?v=21">
+<link rel="stylesheet" href="css/styles.css?v=21">
 </head>
 <body class="min-h-screen">
 
@@ -18,7 +21,13 @@
         <p class="text-xs text-slate-500" id="hdr-meta">Carregando…</p>
       </div>
     </div>
-    <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Voltar ao dashboard</a>
+    <div class="flex items-center gap-2">
+      <a href="index.html" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700">← Voltar ao dashboard</a>
+      <form method="post" action="/logout" class="inline">
+        <button type="submit" class="pill px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200"
+                title="Encerrar a sessão neste navegador">Sair</button>
+      </form>
+    </div>
   </div>
 </header>
 
@@ -118,8 +127,8 @@
   </footer>
 </main>
 
-<script src="js/config.js?v=7"></script>
-<script src="js/api.js?v=7"></script>
-<script src="js/admin.js?v=7"></script>
+<script src="js/config.js?v=21" defer></script>
+<script src="js/api.js?v=21" defer></script>
+<script src="js/admin.js?v=21" defer></script>
 </body>
 </html>

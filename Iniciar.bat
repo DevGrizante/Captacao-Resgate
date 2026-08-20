@@ -10,15 +10,20 @@ rem
 rem  Exigencia unica: Python 3.10+ instalado. O resto (ambiente virtual,
 rem  dependencias, arquivo .env, portas) este script resolve sozinho.
 rem
+rem  UM PROCESSO SO (19/08/2026)
+rem  Antes subiam dois: o uvicorn na 8000 e um `python -m http.server` na 5500
+rem  para os arquivos do painel. O http.server fala HTTP/1.0 - fecha a conexao
+rem  TCP a cada arquivo, nao manda ETag nem Cache-Control e nao comprime nada.
+rem  Agora a propria API serve o painel: uma origem, uma porta, uma janela.
+rem
 rem  CONVIVENCIA COM O CVM MONITOR PRO
 rem  Os dois projetos rodam juntos na mesma maquina. As portas padrao nao se
-rem  cruzam (aqui 8000/5500, la 8080) e, se alguma estiver ocupada, o script
+rem  cruzam (aqui 8000, la 8080) e, se a porta estiver ocupada, o script
 rem  procura a proxima livre em vez de subir por cima de um servidor alheio.
 rem  Cada projeto tem o seu proprio ambiente virtual, dentro da sua pasta.
 rem ===========================================================================
 
 set "API_PORT=8000"
-set "WEB_PORT=5500"
 
 echo ========================================================
 echo       CAPTACAO E RESGATE - INICIANDO O SISTEMA
@@ -130,7 +135,6 @@ rem Se a porta padrao estiver ocupada (outra copia do projeto, ou qualquer
 rem outro servico), andamos para a proxima livre. Subir em cima de um servidor
 rem que ja esta la daria um erro obscuro no meio do log do uvicorn.
 call :porta_livre !API_PORT! API_PORT
-call :porta_livre !WEB_PORT! WEB_PORT
 
 if "!API_PORT!"=="" (
     color 0C
@@ -138,13 +142,7 @@ if "!API_PORT!"=="" (
     pause
     exit /b 1
 )
-if "!WEB_PORT!"=="" (
-    color 0C
-    echo [ERRO] Nao achei nenhuma porta livre para o frontend.
-    pause
-    exit /b 1
-)
-echo [INFO] API na porta !API_PORT! - frontend na porta !WEB_PORT!
+echo [INFO] API e painel na porta !API_PORT!.
 
 rem NOTA SOBRE 127.0.0.1 EM VEZ DE "localhost"
 rem Medido nesta maquina: conectar em "localhost" custa 208 ms, contra 1,7 ms
@@ -154,51 +152,70 @@ rem O front faz varias chamadas por tela, entao isso e a diferenca entre a
 rem interface parecer instantanea e parecer travada. "localhost" continua
 rem funcionando se o usuario digitar - so nao e mais o que geramos.
 
-rem O front precisa saber onde a API subiu, e a API precisa liberar o CORS
-rem para onde o front subiu. As duas pontas saem daqui, do mesmo lugar.
+rem API_BASE vazio = mesma origem. O painel sai do mesmo servidor que a API,
+rem entao o fetch e relativo: nao ha host para acertar, nao ha preflight de
+rem CORS, e a porta pode mudar sem deixar o config.js apontando para o vazio.
+rem
+rem NENHUM PARENTESE NAS MENSAGENS ABAIXO. O bloco de escrita e delimitado por
+rem parenteses, e o cmd o fecha no primeiro fecha-parentese que encontrar - de
+rem dentro de um echo, de dentro de um rem, tanto faz. Escapar com ^^( tambem
+rem nao resolve aqui. Travessao no lugar do parentese e o que funciona.
 > "%~dp0frontend\js\config.js" (
-    echo // Gerado pelo Iniciar.bat com a porta em que a API subiu.
-    echo // Editar a mao tambem funciona.
-    echo window.API_BASE = "http://127.0.0.1:!API_PORT!";
+    echo // Gerado pelo Iniciar.bat. Vazio = mesma origem do painel.
+    echo // Preencha - por exemplo "http://127.0.0.1:8000" - apenas para
+    echo // apontar este painel para uma API que roda em outra maquina.
+    echo window.API_BASE = "";
 )
-set "CORS_ORIGINS=http://127.0.0.1:!WEB_PORT!,http://localhost:!WEB_PORT!"
+rem Mesma origem dispensa CORS. A liberacao fica so para quem abrir o HTML
+rem direto do disco (file://) ou de outro servidor durante um teste.
+set "CORS_ORIGINS=http://127.0.0.1:!API_PORT!,http://localhost:!API_PORT!"
 
-rem --- 5) Subir os servidores ------------------------------------------------
-rem As duas janelas herdam CORS_ORIGINS daqui - processo filho recebe o
-rem ambiente do pai, o que evita ter que passar a variavel dentro da linha de
-rem comando com aspas aninhadas.
-rem Os caminhos do interpretador vao RELATIVOS ao /d de cada janela. Passar o
-rem caminho absoluto exigiria aspas dentro do "cmd /k", que tem uma regra de
-rem remocao de aspas propria e quebra quando a pasta do projeto tem espaco no
-rem nome. Relativo nao tem espaco nunca.
-echo [INFO] Iniciando a API...
-start "API - Captacao porta !API_PORT!" /d "%~dp0backend" ^
-  cmd /k .venv\Scripts\python.exe -m uvicorn app.main:app --port !API_PORT!
-
-echo [INFO] Iniciando o frontend...
-start "Front - Captacao porta !WEB_PORT!" /d "%~dp0frontend" ^
-  cmd /k ..\backend\.venv\Scripts\python.exe -m http.server !WEB_PORT!
+rem --- 5) Subir o servidor ----------------------------------------------------
+rem A janela herda CORS_ORIGINS daqui - processo filho recebe o ambiente do
+rem pai, o que evita passar a variavel dentro da linha de comando com aspas
+rem aninhadas.
+rem O caminho do interpretador vai RELATIVO ao /d da janela. Passar o caminho
+rem absoluto exigiria aspas dentro do "cmd /k", que tem uma regra de remocao de
+rem aspas propria e quebra quando a pasta do projeto tem espaco no nome.
+rem Relativo nao tem espaco nunca.
+rem
+rem --host 127.0.0.1: escuta so no loopback IPv4. Sem isso o uvicorn abre em
+rem   todas as interfaces - o que nao serve para nada aqui e ainda faz o
+rem   Firewall do Windows perguntar se libera, a cada atualizacao do Python.
+rem sem --reload: o vigia de arquivos re-varre o projeto o tempo todo e nao
+rem   ajuda em nada quem so quer usar o painel.
+echo [INFO] Iniciando a API e o painel...
+start "Captacao e Resgate - porta !API_PORT!" /d "%~dp0backend" ^
+  cmd /k .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port !API_PORT!
 
 rem A API carrega dados da CVM no primeiro acesso; abrir o navegador antes de
 rem ela responder mostraria a tela de erro de conexao sem motivo.
 echo [INFO] Aguardando a API responder...
 call :esperar_api !API_PORT!
 
+rem Aquecimento: a primeira chamada de dados e a cara (le a planilha, cruza as
+rem bases da CVM, classifica os fundos) e o resultado fica em memoria. Pagando
+rem isso aqui, com o aviso na tela, o painel abre pronto em vez de mostrar
+rem "Carregando..." por minutos sem explicacao.
+echo [INFO] Carregando as bases (na primeira vez do dia isto demora)...
+call :aquecer !API_PORT!
+
 echo.
 echo ========================================================
 echo [SUCESSO] Tudo pronto^^!
 echo.
-echo   Dashboard ........ http://127.0.0.1:!WEB_PORT!
-echo   Tesourarias ...... http://127.0.0.1:!WEB_PORT!/tesourarias.html
-echo   Painel de controle http://127.0.0.1:!WEB_PORT!/admin.html
+echo   Dashboard ........ http://127.0.0.1:!API_PORT!/
+echo   Tesourarias ...... http://127.0.0.1:!API_PORT!/tesourarias.html
+echo   Papel bancario ... http://127.0.0.1:!API_PORT!/fundos.html
+echo   Painel de controle http://127.0.0.1:!API_PORT!/admin.html
 echo   API / docs ....... http://127.0.0.1:!API_PORT!/docs
 echo.
-echo Mantenha as duas janelas pretas abertas enquanto usa o painel.
-echo Para desligar, feche-as.
+echo Mantenha a janela preta aberta enquanto usa o painel.
+echo Para desligar, feche-a.
 echo ========================================================
 echo.
 
-start "" "http://127.0.0.1:!WEB_PORT!"
+start "" "http://127.0.0.1:!API_PORT!/"
 ping -n 4 127.0.0.1 >nul
 exit /b 0
 
@@ -266,4 +283,26 @@ for /l %%i in (1,1,20) do (
 )
 echo [AVISO] A API demorou a responder. A janela dela mostra o que aconteceu;
 echo         o navegador vai abrir mesmo assim.
+exit /b 0
+
+rem :aquecer <porta> - dispara a primeira carga de dados antes de abrir a tela.
+rem
+rem Sem teto curto, de proposito: com o cache da CVM vazio esta chamada baixa e
+rem cruza as bases e passa de dois minutos. Cortar no meio nao economiza nada -
+rem o trabalho continua no servidor e quem esperaria seria o usuario, ja com a
+rem tela aberta e sem saber por que. Se falhar, seguimos: o painel dispara a
+rem carga sozinho no primeiro acesso.
+rem
+rem O & da URL vai entre aspas duplas dentro do -c, entao o cmd nao o trata
+rem como separador de comando.
+:aquecer
+rem O aquecimento faz LOGIN antes de pedir os dados: desde que o painel ganhou
+rem senha, chamar /api/dashboard direto devolve 401. O scripts/aquecer.py cuida
+rem disso e le a senha do proprio .env, entao ela nao aparece aqui nem no log.
+"%VENV_PY%" "%~dp0backend\scripts\aquecer.py" %~1
+if errorlevel 1 (
+    echo [AVISO] Nao consegui pre-carregar as bases; o painel carrega ao abrir.
+) else (
+    echo [INFO] Bases carregadas.
+)
 exit /b 0

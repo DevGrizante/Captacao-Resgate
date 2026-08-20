@@ -1,0 +1,119 @@
+# =============================================================================
+#  Captacao e Resgate - stack em container
+#
+#  ISTO E PARA SERVIDOR, NAO PARA A MAQUINA DO DIA A DIA.
+#
+#  No Windows do usuario o caminho e o Iniciar.bat: um processo, sem Docker, e
+#  com acesso ao Outlook - que e a fonte de dados padrao (DATA_SOURCE=vinculado)
+#  e depende de COM, que so existe no Windows. Dentro do container Linux o
+#  Outlook fica desligado a forca e a API passa a ler apenas o que ja estiver em
+#  data/inbox/, ou seja, alguem precisa colocar o anexo la todo dia.
+#
+#  NAO PRECISA DE BANCO. A aplicacao persiste em parquet/JSON dentro de data/.
+#  As variaveis DB_* abaixo ficam prontas para o dia em que houver camada de
+#  banco; hoje nenhum modulo as le - `grep -r DATABASE_URL backend/app` nao
+#  devolve nada. Este arquivo sobe sozinho, sem depender de ../infra.
+#
+#      docker compose up -d --build
+#
+#  Painel e API: http://localhost:8000/  (o painel e servido pela propria API)
+# =============================================================================
+
+name: captacao-resgate
+
+services:
+  # ---------------------------------------------------------------------------
+  # api -- FastAPI + Uvicorn
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      # Contexto e a RAIZ do projeto (nao backend/): o Dockerfile precisa
+      # enxergar backend/ como subpasta para que o BASE_DIR calculado em
+      # config.py (parents[2]) continue apontando para /app.
+      context: .
+      dockerfile: backend/Dockerfile
+    image: captacao-resgate-api:local
+    container_name: captacao-api
+    restart: unless-stopped
+
+    env_file:
+      # O .env real do projeto. Nao entra na imagem -- e lido em runtime.
+      - ./backend/.env
+
+    environment:
+      # --- Sobrescritas obrigatorias dentro do container ---
+      # O conector do Outlook usa pywin32 (COM), que so existe no Windows.
+      # No Linux do container isso PRECISA ficar desligado; a API passa a ler
+      # apenas o que ja esta em data/inbox/ (montado como volume).
+      OUTLOOK_ENABLED: "false"
+
+      # O nginx serve o painel na mesma origem e faz proxy de /api, entao a
+      # origem do browser e a do proprio front. Mantidas as portas locais
+      # para quem quiser acessar a API direto durante o desenvolvimento.
+      CORS_ORIGINS: "http://localhost:5500,http://127.0.0.1:5500,http://localhost:8000"
+
+      TZ: America/Sao_Paulo
+
+      # --- MySQL (infra compartilhada) -- INERTE HOJE -----------------------
+      # Nenhum modulo da aplicacao le estas variaveis: a persistencia e toda em
+      # parquet/JSON dentro de data/. Elas ficam aqui prontas para quando a
+      # camada de banco entrar, e por isso NAO ha `depends_on: mysql` -- este
+      # servico sobe e funciona com o banco desligado.
+      # O host seria `mysql`, nome do servico na rede bgc-net -- nunca
+      # localhost, que dentro do container aponta para o proprio container.
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: captacao_resgate
+      DB_USER: captacao_app
+      DB_PASSWORD: captacao_dev_2026
+      DATABASE_URL: "mysql+pymysql://captacao_app:captacao_dev_2026@mysql:3306/captacao_resgate?charset=utf8mb4"
+
+    volumes:
+      # data/ fica FORA da imagem: sao dezenas de MB de cache e os anexos do
+      # e-mail, que sao dado de cliente. Como bind mount, o que o container
+      # baixa fica visivel na maquina e sobrevive a `down`.
+      - ./data:/app/data
+
+    ports:
+      # Exposta para acessar /docs direto. O painel nao depende disto (fala
+      # com a API pela rede interna, via proxy do nginx).
+      - "${API_PORT:-8000}:8000"
+
+    networks:
+      - bgc-net
+
+  # ---------------------------------------------------------------------------
+  # web -- painel estatico servido por nginx
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: captacao-resgate-web:local
+    container_name: captacao-web
+    restart: unless-stopped
+
+    ports:
+      # 5500 mantem a porta que o Iniciar.bat ja usa -- links e favoritos
+      # existentes continuam valendo.
+      - "${WEB_PORT:-5500}:80"
+
+    depends_on:
+      # `service_started` e nao `service_healthy` de proposito: o healthcheck
+      # da API so fica verde depois da primeira carga (que pode levar
+      # minutos). O nginx pode subir antes; quem chegar cedo demais ve o erro
+      # da propria API, que e informativo, em vez de um container parado.
+      api:
+        condition: service_started
+
+    networks:
+      - bgc-net
+
+networks:
+  bgc-net:
+    # NAO e `external: true`. Se fosse, este compose se recusaria a subir
+    # enquanto ../infra nao tivesse criado a rede - ou seja, o projeto so
+    # rodaria depois do banco, sendo que ele nao usa banco nenhum. Assim o
+    # Compose cria a rede se ela nao existir e reaproveita se ja existir, que e
+    # o que faz os dois projetos se enxergarem quando ambos estao no ar.
+    name: bgc-net

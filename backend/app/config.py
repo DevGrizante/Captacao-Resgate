@@ -190,5 +190,48 @@ class Settings:
         "CORS_ORIGINS", "http://localhost:5500,http://127.0.0.1:5500,http://localhost:8080"
     ).split(",")
 
+    # --- Senha do painel ---
+    # Uma senha só, igual para todo mundo. É o mínimo para publicar o painel
+    # num endereço alcançável: sem ela, quem descobrir a URL vê fluxo por
+    # gestora e pode alterar o corte de classificação para todos.
+    #
+    # VAZIO = SEM SENHA. É o padrão de propósito: quem roda em 127.0.0.1 na
+    # própria máquina não deveria ter de digitar senha para ver o próprio
+    # painel. Em servidor, preencher é obrigatório — o app avisa no log ao
+    # subir se estiver vazio.
+    PAINEL_SENHA: str = os.getenv("PAINEL_SENHA", "")
+    # Assina o cookie de sessão. Sem valor, é sorteado a cada partida e todo
+    # mundo cai no reinício. Nunca ter um padrão fixo no código: seria a mesma
+    # chave em toda instalação, e qualquer um forjaria um cookie válido.
+    #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+    PAINEL_SEGREDO: str = os.getenv("PAINEL_SEGREDO", "")
+    # Quanto tempo a sessão dura. 12 h cobre o dia inteiro de mesa sem pedir
+    # senha de novo no meio de uma negociação.
+    PAINEL_SESSAO_HORAS: int = int(os.getenv("PAINEL_SESSAO_HORAS", "12"))
+    # Marca o cookie como `Secure` (só trafega em HTTPS). Deixe true no
+    # servidor; em 127.0.0.1 precisa ser false, senão o navegador descarta o
+    # cookie e o login entra em laço infinito.
+    PAINEL_COOKIE_SEGURO: bool = (
+        os.getenv("PAINEL_COOKIE_SEGURO", "false").lower() == "true"
+    )
+
+    # --- Ingestão pela rede (POST /api/inbox) ---
+    # Permite que a planilha do e-mail chegue por HTTP em vez de pelo Outlook
+    # local. É o que torna o app rodável em servidor: no Linux não existe COM,
+    # então alguém precisa EMPURRAR o arquivo para dentro.
+    #
+    # SEM TOKEN A INGESTÃO FICA DESLIGADA, e não aberta. Um endpoint que
+    # aceita upload sem autenticação é pior que endpoint nenhum: qualquer um
+    # que alcance a URL passa a decidir que números a mesa vê. O valor vazio é
+    # o padrão justamente para que subir sem configurar não exponha nada.
+    INGESTAO_TOKEN: str = os.getenv("INGESTAO_TOKEN", "")
+    # Teto do corpo aceito. A planilha tem ~1,2 MB; 25 MB dá folga de sobra e
+    # ainda impede que um corpo gigante consuma a memória do servidor.
+    INGESTAO_TAMANHO_MAXIMO_MB: int = int(os.getenv("INGESTAO_TAMANHO_MAXIMO_MB", "25"))
+    # Quantas planilhas manter na inbox. Uma por dia útil ≈ 1,2 MB/dia, o que
+    # em um ano encheria 300 MB de um disco de VPS sem que ninguém percebesse.
+    # 0 = guardar todas.
+    INGESTAO_MANTER_ARQUIVOS: int = int(os.getenv("INGESTAO_MANTER_ARQUIVOS", "60"))
+
 
 settings = Settings()

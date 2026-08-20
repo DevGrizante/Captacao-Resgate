@@ -1,0 +1,62 @@
+# =============================================================================
+#  Serviço systemd do painel — Captação e Resgate
+#
+#  Instalar:
+#      sudo cp deploy/painel.service /etc/systemd/system/
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now painel
+#
+#  Acompanhar:
+#      systemctl status painel
+#      sudo journalctl -u painel -f
+#
+#  Ajuste User e os caminhos se não estiver usando /home/ubuntu/painel.
+# =============================================================================
+
+[Unit]
+Description=Painel Captacao e Resgate (FastAPI)
+Documentation=https://github.com/DevGrizante/Captacao-Resgate
+# network-online, e não apenas network: a primeira carga baixa as bases da CVM,
+# e subir antes de haver rota para a internet faria o serviço nascer falhando.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/painel/backend
+
+# --host 127.0.0.1: escuta só no loopback. Quem fala com a internet é o Caddy,
+# que termina o TLS. Sem isto, a porta 8000 ficaria acessível direto e daria
+# para contornar o HTTPS — e o cookie de sessão viajaria em texto claro.
+ExecStart=/home/ubuntu/painel/backend/.venv/bin/uvicorn app.main:app \
+          --host 127.0.0.1 --port 8000 --no-server-header
+
+Restart=always
+RestartSec=5
+# A primeira carga passa de nove minutos e consome ~2 GB. Sem esta folga, o
+# systemd mataria o processo no meio achando que ele travou.
+TimeoutStartSec=1200
+
+# Log vai para o journal; o uvicorn não precisa gerenciar arquivo nenhum.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=painel
+
+# --- Contenção -------------------------------------------------------------
+# Se a aplicação for comprometida, estas linhas limitam o estrago. Custam nada
+# e valem para qualquer coisa exposta na internet.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+# O app precisa ESCREVER em data/ (cache da CVM, inbox, parâmetros do painel).
+# ProtectHome=read-only bloquearia isso — esta linha reabre só o necessário.
+ReadWritePaths=/home/ubuntu/painel/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
