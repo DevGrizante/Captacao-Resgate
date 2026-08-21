@@ -31,6 +31,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
+from datetime import UTC
 
 from app.config import DATA_DIR, settings
 
@@ -229,10 +230,10 @@ def _escrever(d: Definicao, valor_pct: float) -> None:
 
 def _persistir() -> None:
     ARQUIVO.parent.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     conteudo = {
-        "atualizado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "atualizado_em": datetime.now(UTC).isoformat(timespec="seconds"),
         "valores": {d.chave: _ler(d) for d in DEFINICOES},
     }
     # Grava em arquivo temporário e troca: uma queda no meio da escrita deixaria

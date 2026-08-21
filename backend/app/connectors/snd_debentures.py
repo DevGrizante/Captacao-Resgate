@@ -89,7 +89,7 @@ def carregar() -> dict[str, str]:
         try:
             df = pd.read_parquet(_CACHE)
             logger.info("SND: usando cache local (%d papéis).", len(df))
-            return dict(zip(df["cod"], df["eixo"]))
+            return dict(zip(df["cod"], df["eixo"], strict=True))
         except Exception as e:  # noqa: BLE001
             logger.debug("cache do SND ilegível (%s), rebaixando.", e)
 
@@ -134,4 +134,4 @@ def carregar() -> dict[str, str]:
     except Exception as e:  # noqa: BLE001
         logger.debug("cache do SND: %s", e)
     logger.info("SND: %d debêntures com indexador.", len(df))
-    return dict(zip(df["cod"], df["eixo"]))
+    return dict(zip(df["cod"], df["eixo"], strict=True))

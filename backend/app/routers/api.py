@@ -6,14 +6,14 @@ from fastapi import APIRouter, HTTPException, Query
 from app.models.schemas import (
     DashboardResponse,
     DossieResponse,
-    EmissorPapelBancario,
     EmissorPapelBancarioDetalhe,
     EmissorPapelBancarioNaLista,
     FonteInfo,
-    MoverGestora,
-    StressFundo,
     FundoPapelBancario,
     FundoPapelBancarioDetalhe,
+    MoverGestora,
+    PressaoResposta,
+    StressFundo,
     TesourariaDossie,
     TesourariaResumo,
 )
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api", tags=["captacao"])
 def get_dashboard(
     janela: str = Query("semanal"),
     indexador: str = Query("todos"),
-    abertos: bool = Query(True)
+    abertos: bool = Query(False)
 ):
     """Payload principal: KPIs, buckets, série temporal e ranking de gestoras."""
     return pipeline.dashboard(janela, indexador, abertos)
@@ -37,7 +37,7 @@ def get_dossie(
     gestora: str,
     janela: str = Query("semanal"),
     indexador: str = Query("todos"),
-    abertos: bool = Query(True)
+    abertos: bool = Query(False)
 ):
     """Painel lateral de uma gestora: resumo, mix, métricas, spark e fundos."""
     resp = pipeline.dossie(gestora, janela, indexador, abertos)
@@ -52,7 +52,7 @@ def get_movers(
     limite: int = Query(6, ge=1, le=50),
     janela: str = Query("semanal"),
     indexador: str = Query("todos"),
-    abertos: bool = Query(True)
+    abertos: bool = Query(False)
 ):
     """Gestoras com maior variação % de PL (ganhando/perdendo)."""
     return pipeline.movers(direcao, limite, janela, indexador, abertos)
@@ -63,7 +63,7 @@ def get_stress(
     limite: int = Query(50, ge=1, le=200),
     janela: str = Query("semanal"),
     indexador: str = Query("todos"),
-    abertos: bool = Query(True)
+    abertos: bool = Query(False)
 ):
     """Fundos com resgate acima do limiar de estresse na semana."""
     return pipeline.stress(limite, janela, indexador, abertos)
@@ -173,6 +173,30 @@ def get_papel_por_emissor_detalhe(raiz: str):
     return resp
 
 
+@router.get("/pressao", response_model=PressaoResposta)
+def get_pressao(
+    janela: str = Query("semanal"),
+    limite: int = Query(500, ge=1, le=2000),
+    direcao: str = Query("todas", pattern="^(todas|comprador|vendedor|neutro)$"),
+):
+    """Pressão de compra/venda por gestora, cruzada com a agenda de vencimento.
+
+    A leitura central da mesa:
+
+        captação líquida  -> a casa vai COMPRAR papel
+        resgate líquido   -> vai VENDER
+        papel vencendo    -> precisa ROLAR, capte ela ou não
+
+    Cada gestora vem com o estoque e a agenda (3, 6 e 12 meses) quebrados por
+    eixo — LF, CDB, IPCA, CDI, pré —, mais a frase que cruza fluxo e agenda.
+
+    A ordenação é pelo que vence em 3 meses, e não pelo tamanho da casa: a tela
+    mostra onde a pressão está prestes a aparecer, e a maior gestora do mercado
+    sem nada vencendo não é notícia.
+    """
+    return pipeline.pressao(janela, limite, direcao)
+
+
 @router.get("/fonte", response_model=FonteInfo)
 def get_fonte():
     """De onde vieram os dados em cache e o que essa fonte não entrega."""
@@ -195,4 +219,37 @@ def post_refresh():
         "fonte": info.fonte,
         "arquivo": info.arquivo,
         "recebido_em": info.recebido_em,
+    }
+
+
+@router.post("/admin/coletar-email")
+def post_coletar_email():
+    """Vai à caixa de e-mail agora, sem esperar o próximo ciclo do agendador.
+
+    É o botão para quando o relatório chega fora de hora. Com `EMAIL_MODO=off`
+    responde 503 e diz o que configurar — nunca finge que coletou.
+    """
+    from app.services import email_inbox
+
+    if not email_inbox.habilitado():
+        raise HTTPException(
+            status_code=503,
+            detail="Ingestão por e-mail desligada. Defina EMAIL_MODO=graph ou "
+                   "EMAIL_MODO=imap no .env do servidor.",
+        )
+
+    recebido = email_inbox.sincronizar()
+    if recebido is None:
+        return {"status": "sem_novidade",
+                "message": "Nenhum e-mail novo com anexo que casasse."}
+
+    if not recebido.ja_existia:
+        pipeline.refresh()
+
+    return {
+        "status": "ja_tinha" if recebido.ja_existia else "novo",
+        "arquivo": recebido.nome,
+        "sha256": recebido.sha256,
+        "bytes": recebido.bytes_,
+        "recalculado": not recebido.ja_existia,
     }

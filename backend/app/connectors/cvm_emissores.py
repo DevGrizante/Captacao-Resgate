@@ -559,4 +559,5 @@ def nomes_por_raiz(emissores: pd.DataFrame) -> dict[str, str]:
     if emissores.empty:
         return {}
     idx = emissores.groupby("raiz_emissor")["valor"].idxmax()
-    return dict(zip(emissores.loc[idx, "raiz_emissor"], emissores.loc[idx, "emissor"]))
+    return dict(zip(emissores.loc[idx, "raiz_emissor"], emissores.loc[idx, "emissor"],
+                    strict=True))

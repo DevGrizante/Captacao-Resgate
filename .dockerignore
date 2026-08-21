@@ -18,6 +18,7 @@ venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.cache/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -41,8 +42,21 @@ frontend/js/config.js
 .gitignore
 .github/
 *.md
-Iniciar.bat
-test_fixes.py
+
+# Os .bat sao o caminho do WINDOWS (Iniciar, Coletar_e_Enviar, Enviar_Cache).
+# Dentro de um container Linux eles nao rodam e nao servem de documentacao —
+# sao superficie morta na imagem.
+*.bat
+
+# A suite de testes e as dependencias de dev nao vao para producao: pytest e
+# ruff sao ferramentas de quem escreve, nao de quem serve o painel.
+backend/tests/
+backend/requirements-dev.txt
+pyproject.toml
+
+# O build do CSS (tailwind) roda em Node e produz frontend/css/tailwind.css,
+# que JA esta versionado. So quem MUDA classe do painel precisa desta pasta.
+frontend/build/
 
 # --- Editores / SO -----------------------------------------------------------
 .vscode/

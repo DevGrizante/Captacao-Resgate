@@ -1,9 +1,9 @@
 """
 Puxa as bases públicas de balcão da B3: cadastro de instrumentos e negócios.
 
-    python scripts/b3_balcao.py                      # último dia útil publicado
-    python scripts/b3_balcao.py 2026-08-13           # uma data específica
-    python scripts/b3_balcao.py 2026-08-13 --tudo    # sem filtrar por LF
+    python backend/scripts/analise/b3_balcao.py                      # último dia útil publicado
+    python backend/scripts/analise/b3_balcao.py 2026-08-13           # uma data específica
+    python backend/scripts/analise/b3_balcao.py 2026-08-13 --tudo    # sem filtrar por LF
 
 Gera em `data/b3/`:
     cadastro_lf_<data>.csv       LF/LFS/LFSC/LFSN/LFV com ticker, ISIN, taxa e vencimento
@@ -63,7 +63,7 @@ CABECALHOS = {
 # outro preço.
 TIPOS_LF = ("LF", "LFS", "LFSC", "LFSN", "LFV")
 
-SAIDA = Path(__file__).resolve().parents[2] / "data" / "b3"
+SAIDA = Path(__file__).resolve().parents[3] / "data" / "b3"
 
 # Abaixo disto o cadastro claramente veio truncado (o normal são ~285 mil).
 _MINIMO_CADASTRO = 50_000

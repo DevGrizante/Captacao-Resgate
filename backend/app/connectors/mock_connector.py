@@ -21,7 +21,7 @@ class MockConnector(DataConnector):
         if not caminho.exists():
             raise FileNotFoundError(
                 f"mock_fundos.json não encontrado em {caminho}. "
-                "Rode scripts/gerar_mock.py ou use DATA_SOURCE=cvm."
+                "Rode scripts/analise/gerar_mock.py ou use DATA_SOURCE=cvm."
             )
         with open(caminho, encoding="utf-8") as f:
             return json.load(f)

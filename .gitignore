@@ -16,8 +16,30 @@ data/cache/*
 data/inbox/*
 !data/inbox/.gitkeep
 
-# Relatórios gerados (scripts/relatorio_cobertura.py)
+# Relatórios gerados (scripts/analise/relatorio_cobertura.py, scripts/analise/conciliar_cnpjs.py)
 data/relatorios/
+
+# Saídas do scripts/analise/b3_balcao.py. São recortes de um dia de mercado, sempre
+# regeneráveis pelo script — versionar congelava 1,6 MB de um dia específico
+# no repositório sem que ninguém voltasse a olhar para ele.
+data/b3/
+
+# O mock (6,4 MB) é regenerado por `python backend/scripts/analise/gerar_mock.py`.
+# Ele nasce de um vinculado_*.xlsx, ou seja, é DERIVADO de dado de cliente —
+# e era o maior arquivo do repositório, sozinho maior que todo o código.
+data/mock_fundos.json
+
+# Base histórica de debêntures da B3 (backend/scripts/analise/b3_historico_deb.py).
+# São dezenas de MB baixados da API pública, sempre regeneráveis pelo script —
+# versionar congelaria no repositório um recorte que envelhece todo dia.
+data/Base_DEB/
+
+# Cache de ferramentas (ruff e pytest). Concentrados em .cache/ pelo
+# pyproject.toml; os dois nomes antigos ficam listados para quem tiver as
+# pastas de antes da mudança de 21/08/2026.
+.cache/
+.pytest_cache/
+.ruff_cache/
 
 # Parâmetros gravados pelo painel de controle. É estado local da máquina: o
 # valor que o projeto entrega vive em backend/.env.example.

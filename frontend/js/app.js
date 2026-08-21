@@ -1,6 +1,6 @@
 // ===== Estado e utilidades =====
-const state = { janela: "semanal", indexador: "todos", abertos: true, sortBy: "semestral",
-                search: "", moversDir: "pos", view: "fluxo", fluxo: "captacao" };
+const state = { janela: "semanal", indexador: "todos", sortBy: "semestral",
+                search: "", moversDir: "pos", fluxo: "captacao" };
 let DATA = null;        // payload /api/dashboard
 let sparkChart = null;
 let timelineChart = null;
@@ -63,15 +63,51 @@ const rotuloCampo = {
 function temIndexador() { return DATA.total_sem_classificacao < DATA.total_fundos; }
 
 // ===== Boot =====
+//
+// >>> A MENSAGEM DE ERRO PRECISA DIZER DE QUEM É A CULPA (21/08/2026)
+//
+// Este catch pega TUDO: a API fora do ar, a sessão vencida e qualquer defeito
+// no próprio JavaScript. Durante muito tempo ele acusava sempre a mesma coisa —
+// "não consegui falar com a API, suba o backend" —, e isso mandou gente
+// reiniciar um backend que estava perfeito.
+//
+// O caso real que motivou a separação: um `?v=` não atualizado fez o navegador
+// servir o app.js ANTIGO sobre um HTML novo. O JS quebrou num elemento que não
+// existia mais, e a tela culpou o servidor.
+//
+// Agora a mensagem sai do tipo do erro, e o caso do cache tem instrução própria
+// porque é o mais provável e o menos óbvio: o JS é servido com `immutable` por
+// um ano, então o navegador NUNCA revalida sozinho.
 async function init() {
   try {
     await refreshData();
     bindEvents();
   } catch (e) {
+    // Só a MENSAGEM distingue. `instanceof TypeError` não serve: tanto o
+    // `fetch` que não sai da máquina quanto um `null.addEventListener` são
+    // TypeError, e foi exatamente essa confusão que produziu o diagnóstico
+    // errado da primeira vez.
+    const daRede = /Failed to fetch|NetworkError|Load failed|ERR_CONNECTION/i.test(e.message);
+    const daApi = /^API .* -> \d+$/.test(e.message);
+
+    let titulo, dica;
+    if (daRede) {
+      titulo = `Não consegui falar com a API em ${API_BASE || location.origin}.`;
+      dica = "O backend não respondeu. Suba-o e recarregue.";
+    } else if (daApi) {
+      titulo = "A API respondeu com erro.";
+      dica = "O backend está de pé, mas recusou a requisição. Veja o log dele.";
+    } else {
+      titulo = "Erro no JavaScript do painel — a API não tem culpa.";
+      dica = "Se a tela mudou há pouco, é cache: recarregue com Ctrl+Shift+R. " +
+             "O JS é servido com cache de um ano, e o navegador só busca de novo " +
+             "quando o ?v= dos .html muda.";
+    }
+
     document.body.insertAdjacentHTML("afterbegin",
       `<div class="bg-red-950 text-red-300 text-sm p-3 text-center">
-        Não consegui falar com a API em ${API_BASE}. Suba o backend (uvicorn app.main:app --port 8000) e recarregue.<br>
-        <span style="color: yellow; font-family: monospace;">ERRO JS: ${e.message}</span>
+        <strong>${titulo}</strong><br>${dica}<br>
+        <span style="color: yellow; font-family: monospace;">${e.message}</span>
       </div>`);
     console.error(e);
   }
@@ -184,8 +220,8 @@ function renderFonte() {
       : (temIndexador() ? null : "bucket indisponível"),
   ].filter(Boolean).join(" · ");
 
-  aviso.className = "bg-amber-950/40 border-b border-amber-900/50 text-amber-200/90 text-xs px-6 py-2";
-  aviso.innerHTML = `<div class="max-w-[1400px] mx-auto">
+  aviso.className = "bg-amber-950/40 border-b border-amber-900/50 text-amber-200/90 text-xs py-2";
+  aviso.innerHTML = `<div class="faixa">
       <div class="flex items-baseline gap-2 flex-wrap">
         <span>Cobertura dos dados: ${resumo}.</span>
         <button type="button" class="underline underline-offset-2 hover:text-amber-100" id="aviso-toggle">ver detalhes</button>
@@ -408,52 +444,21 @@ function renderTop() {
 
 // Colunas por visão. Uma tabela única com tudo teria 16 colunas e nenhuma
 // legível; o broker escolhe a lente conforme a pergunta que está fazendo.
-const COLUNAS = {
-  fluxo: [
-    ["Fundos", "c", g => g.fundos],
-    ["PL", "d", g => ou(g.pl, v => fmtBRL(v).replace("+", ""))],
-    ["Mix da classificação", "c", g => barraMix(g)],
-    ["Diária", "d", g => num(g.diaria)],
-    ["Semanal", "d", g => num(g.semanal)],
-    ["Mensal", "d", g => num(g.mensal)],
-    ["Semestral", "d", g => num(g.semestral)],
-  ],
-  mesa: [
-    ["Fundos", "c", g => g.fundos],
-    ["PL", "d", g => ou(g.pl, v => fmtBRL(v).replace("+", ""))],
-    ["Share", "d", g => ou(g.share_pl_pct, v => v.toFixed(2) + "%")],
-    ["Taxa adm", "d", g => ou(g.taxa_adm_media, v => v.toFixed(2) + "%")],
-    ["Cotização", "c", g => ou(g.cotizacao_media, v => "D+" + v)],
-    ["Prazo cart.", "c", g => ou(g.prazo_carteira_dias, v => Math.round(v) + "d")],
-    // Em que instrumento a casa entra — é o que decide se ela é cliente de
-    // debênture ou de papel bancário, e isso não sai do bucket.
-    ["Papel", "c", g => barraPapel(g)],
-    // Zero aqui é informação, não ausência: gestora cujo fundo típico não tem
-    // aplicação mínima é exatamente o que se procura para o cliente pequeno.
-    ["Aplic. típica", "d", g => ou(g.aplicacao_minima, v =>
-      v === 0 ? `<span class="num-pos">sem mín.</span>` : fmtBRL(v).replace("+", ""))],
-    ["Semestral", "d", g => num(g.semestral)],
-  ],
-  perf: [
-    ["Fundos", "c", g => g.fundos],
-    ["PL", "d", g => ou(g.pl, v => fmtBRL(v).replace("+", ""))],
-    ["Rentab.", "d", g => ou(g.rentab_media_pct, v => `<span class="${cls(v)}">${v.toFixed(2)}%</span>`)],
-    ["Vol.", "d", g => ou(g.vol_media_pct, v => v.toFixed(2) + "%")],
-    ["Pós / inflação", "c", g => barraPerfilIdx(g)],
-    ["% cred. priv.", "d", g => ou(g.pct_credito_privado, v => v.toFixed(0) + "%")],
-    ["Prazo cart.", "c", g => ou(g.prazo_carteira_dias, v => Math.round(v) + "d")],
-    ["Semestral", "d", g => num(g.semestral)],
-  ],
-  dist: [
-    ["Fundos", "c", g => g.fundos],
-    ["PL", "d", g => ou(g.pl, v => fmtBRL(v).replace("+", ""))],
-    ["Cotistas", "d", g => ou(g.cotistas, v => v.toLocaleString("pt-BR"))],
-    ["Δ cotistas", "d", g => ou(g.cotistas_var_pct, v => `<span class="${cls(v)}">${v > 0 ? "+" : ""}${v.toFixed(1)}%</span>`)],
-    ["Público-alvo", "e", g => `<span class="text-slate-400">${g.publico_alvo || VAZIO}</span>`],
-    ["Quem compra", "e", g => barraPerfil(g.perfil_cotistas)],
-    ["Semestral", "d", g => num(g.semestral)],
-  ],
-};
+// As colunas da tabela consolidada. Era um dicionário de quatro conjuntos
+// alternados pelo seletor "Visão" (fluxo / mesa / performance / distribuição).
+// O seletor saiu em 21/08/2026 e os outros três conjuntos foram com ele: o
+// relatório é sobre FLUXO da gestora, e taxa de administração, rentabilidade e
+// perfil de cotista descrevem o produto para o investidor final — que não é
+// com quem esta mesa opera.
+const COLUNAS = [
+  ["Fundos", "c", g => g.fundos],
+  ["PL", "d", g => ou(g.pl, v => fmtBRL(v).replace("+", ""))],
+  ["Mix da classificação", "c", g => barraMix(g)],
+  ["Diária", "d", g => num(g.diaria)],
+  ["Semanal", "d", g => num(g.semanal)],
+  ["Mensal", "d", g => num(g.mensal)],
+  ["Semestral", "d", g => num(g.semestral)],
+];
 
 // Cores por tipo de investidor, para a barra de "quem compra".
 const CORES_PERFIL = {
@@ -480,42 +485,14 @@ function barraMix(g) {
 // Mix por instrumento. O trecho cinza ao fim é o que não é debênture/LF/CDB/
 // CRI — fica visível de propósito, para a barra não sugerir que a leitura da
 // carteira foi completa quando não foi.
+// Mix por INSTRUMENTO, usado pelo dossiê da gestora. Eixo diferente do bucket:
+// "compra IPCA+" e "compra debênture" são perguntas distintas, e uma casa de LF
+// é cliente de outro produto.
 const PAPEIS = [["papel_debenture", "#a78bfa", "Debênture"], ["papel_lf", "#fbbf24", "LF"],
                 ["papel_cdb", "#60a5fa", "CDB/DPGE"], ["papel_cri_cra", "#34d399", "CRI/CRA/NP"]];
-function barraPapel(g) {
-  if (g.papel_debenture === null || g.papel_debenture === undefined) {
-    return `<span class="text-slate-600">${VAZIO}</span>`;
-  }
-  const titulo = PAPEIS.map(([k, , rot]) => `${rot} ${((g[k] || 0) * 100).toFixed(0)}%`).join(" · ");
-  return `<div class="flex h-1.5 w-28 rounded overflow-hidden mx-auto" title="${titulo}">
-    ${PAPEIS.map(([k, c]) => `<div style="width:${(g[k] || 0) * 100}%;background:${c}"></div>`).join("")}
-    <div class="flex-1" style="background:#1e293b"></div></div>`;
-}
-
-// Perfil de indexador observado. Cores propositalmente diferentes das do mix
-// por bucket (roxo/azul/âmbar): são medidas diferentes e não podem ser lidas
-// como a mesma coisa.
-function barraPerfilIdx(g) {
-  const pos = g.perfil_pos_pct, inf = g.perfil_inflacao_pct;
-  if (pos === null || pos === undefined) return `<span class="text-slate-600">${VAZIO}</span>`;
-  return `<div class="flex h-1.5 w-24 rounded overflow-hidden mx-auto"
-      title="Pós-fixado ${pos.toFixed(0)}% · Inflação ${inf.toFixed(0)}%${g.perfil_indefinido ? ` · ${g.perfil_indefinido} sem perfil` : ""}">
-    <div style="width:${pos}%;background:#22d3ee"></div>
-    <div style="width:${inf}%;background:#f472b6"></div>
-  </div>`;
-}
-
-function barraPerfil(perfil) {
-  const itens = Object.entries(perfil || {}).sort((a, b) => b[1] - a[1]);
-  if (!itens.length) return `<span class="text-slate-600">${VAZIO}</span>`;
-  const titulo = itens.map(([k, v]) => `${(CORES_PERFIL[k] || [, k])[1]} ${v.toFixed(0)}%`).join(" · ");
-  return `<div class="flex h-1.5 w-32 rounded overflow-hidden" title="${titulo}">
-    ${itens.map(([k, v]) => `<div style="width:${v}%;background:${(CORES_PERFIL[k] || ["#475569"])[0]}"></div>`).join("")}
-  </div>`;
-}
 
 function renderTable() {
-  const cols = COLUNAS[state.view] || COLUNAS.fluxo;
+  const cols = COLUNAS;
   const alinha = { c: "text-center", d: "text-right font-mono", e: "text-left" };
 
   document.getElementById("table-head").innerHTML =
@@ -837,24 +814,15 @@ function closeDossie() {
 function bindEvents() {
   bindTabs("janela-tabs", "janela", () => { document.getElementById("idx-window-label").textContent = state.janela; refreshData(); });
   bindTabs("idx-tabs", "indexador", () => { refreshData(); });
-  document.getElementById("abertos-checkbox").addEventListener("change", e => { state.abertos = e.target.checked; refreshData(); });
   document.getElementById("search").addEventListener("input", e => { state.search = e.target.value; renderTable(); });
   document.getElementById("sort-by").addEventListener("change", e => { state.sortBy = e.target.value; renderTable(); });
   document.getElementById("fluxo-filtro").addEventListener("change", e => { state.fluxo = e.target.value; renderTable(); });
-  document.getElementById("view-mode").addEventListener("change", e => { state.view = e.target.value; renderTable(); });
   document.getElementById("movers-dir").addEventListener("change", e => { state.moversDir = e.target.value; renderMovers(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeDossie(); });
 
   // Filtros que dependem de dado que a fonte não tem só confundiriam: filtrar
   // por IPCA+ sem classificação devolveria um dashboard zerado.
   if (!temIndexador()) desabilitar("#idx-tabs button:not([data-i='todos'])", "sem classificação por indexador nesta fonte");
-  if (DATA.kpis_mesa.fundos_abertos === null) {
-    const chk = document.getElementById("abertos-checkbox");
-    chk.checked = false; chk.disabled = true;
-    state.abertos = false;
-    chk.closest("label").classList.add("opacity-40");
-    chk.closest("label").title = "status de captação vem do Quantum Axis";
-  }
 }
 function desabilitar(seletor, motivo) {
   document.querySelectorAll(seletor).forEach(b => {

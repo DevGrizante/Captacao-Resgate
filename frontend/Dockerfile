@@ -37,7 +37,7 @@ FROM nginx:1.27-alpine AS runtime
 RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
 
 COPY --from=assets /src /usr/share/nginx/html
-COPY docker/nginx.conf /etc/nginx/conf.d/app.conf
+COPY deploy/nginx.conf /etc/nginx/conf.d/app.conf
 
 # nginx:alpine ja roda os workers como usuario `nginx`; o master precisa de
 # root apenas para abrir a porta 80 dentro do container.

@@ -23,6 +23,7 @@ nada. Com o painel montado aqui:
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request, status
@@ -33,7 +34,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from app.config import BASE_DIR, settings
 from app.routers import admin, api, auth, ingestao
-from app.services import parametros, sessao
+from app.services import agendador, email_inbox, parametros, sessao
 
 # Os parâmetros gravados pelo painel de controle precisam valer ANTES de
 # qualquer classificação — e o pipeline classifica na primeira requisição.
@@ -43,11 +44,36 @@ logger = logging.getLogger("api")
 
 parametros.carregar_do_disco()
 
+@asynccontextmanager
+async def ciclo_de_vida(_: FastAPI):
+    """Sobe e desce as tarefas periódicas junto com o processo.
+
+    As duas tarefas são de FUNDO por exigência de desempenho: nenhuma delas
+    pode acontecer enquanto alguém espera uma resposta HTTP. Ver
+    `services/agendador.py` para o porquê de não haver cron nem broker aqui.
+
+    Registrar com intervalo 0 é o mesmo que não registrar, e é o padrão — quem
+    não configurar nada continua com exatamente o comportamento de hoje.
+    """
+    if email_inbox.habilitado():
+        agendador.registrar(
+            "coleta-email", email_inbox.sincronizar, settings.EMAIL_INTERVALO_MIN
+        )
+    else:
+        logger.info("Ingestão por e-mail desligada (EMAIL_MODO=%s).", settings.EMAIL_MODO)
+
+    try:
+        yield
+    finally:
+        await agendador.parar()
+
+
 app = FastAPI(
     title="Captação e Resgate · Crédito Privado",
     description="Consolidação de captação/resgate de fundos de crédito privado, "
                 "classificados em LF / Incentivada / Tradicional / Misto.",
-    version="0.2.0",
+    version="0.3.0",
+    lifespan=ciclo_de_vida,
 )
 
 app.add_middleware(

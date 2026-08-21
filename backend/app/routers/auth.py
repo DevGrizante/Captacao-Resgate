@@ -12,9 +12,7 @@ jogado na home depois de entrar, e teria de refazer o caminho.
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlparse
-
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse

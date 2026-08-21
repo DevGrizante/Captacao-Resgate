@@ -65,3 +65,115 @@ select.mini:focus { outline:none; border-color:#3b82f6; }
 .combo-opcao:hover, .combo-marcado { background: #1e293b; color: #fff; }
 .combo-extra { color: #64748b; font-variant-numeric: tabular-nums; }
 .combo-vazio { padding: 6px 8px; font-size: 11px; color: #64748b; }
+
+/* ============================================================================
+   FAIXA DE CONTEÚDO — o limite físico de toda tela do painel
+   ============================================================================
+   Um recuo horizontal fixo, com o fundo do viewport aparecendo dos dois lados,
+   e os cards nascendo EXATAMENTE na borda interna — sem padding a mais entre a
+   faixa e o primeiro pixel de conteúdo.
+
+   >>> POR QUE AQUI, E NÃO EM CLASSE DO TAILWIND NO HTML
+
+   O CSS do Tailwind deste projeto é PRÉ-COMPILADO (frontend/css/tailwind.css,
+   gerado por `frontend/build/gerar_css.bat`). Uma classe nova escrita no HTML —
+   `px-[100px]`, `max-w-none` — não existe no arquivo gerado até alguém rodar o
+   build com Node. O layout simplesmente não aplicaria, sem erro nenhum.
+
+   Aqui a regra vale na hora, em todas as telas, e muda num lugar só.
+
+   >>> POR QUE NÃO `width: calc(100vw - 200px)`
+
+   `100vw` inclui a barra de rolagem. Esta tela sempre tem rolagem vertical, e
+   no Windows a barra come ~15px. O resultado seria uma caixa 200px mais estreita
+   que o viewport COM barra, ou seja ~185px mais estreita que a área útil — e o
+   `margin: 0 auto` centraria isso em ~92px de cada lado, não 100. Pior: o valor
+   mudaria conforme o SO, o navegador e a presença da barra.
+
+   `padding-inline` mede a partir da área útil. Dá 100px exatos, sempre.
+
+   >>> O RECUO ENCOLHE EM TELA ESTREITA
+
+   100px fixos consomem 15% de um notebook de 1366 e 26% de um tablet. Os cortes
+   abaixo devolvem a largura onde ela é escassa, sem mexer no visual do desktop.
+   ========================================================================== */
+:root {
+  --faixa-recuo: 100px;
+}
+
+.faixa {
+  width: 100%;
+  padding-inline: var(--faixa-recuo);
+  /* `margin-inline: auto` fica aqui para o caso de alguém reativar o teto de
+     largura no bloco comentado abaixo. Sem teto, ele não faz nada. */
+  margin-inline: auto;
+}
+
+/* Teto de largura — DESLIGADO de propósito.
+   A régua pedida é "100px de cada lado", que é fluida: em 1920 dá 1720px de
+   conteúdo. Um `max-width` fixo brigaria com ela — 1400px numa tela de 1920
+   viraria 260px de margem, não 100. Ligue só se a tabela ficar larga demais em
+   monitor ultrawide, sabendo que a partir daí a margem deixa de ser 100px.
+.faixa { max-width: 1720px; }
+*/
+
+@media (max-width: 1280px) { :root { --faixa-recuo: 48px; } }
+@media (max-width: 900px)  { :root { --faixa-recuo: 24px; } }
+@media (max-width: 640px)  { :root { --faixa-recuo: 16px; } }
+
+/* Formulário e texto corrido não se leem em 1.700px de largura. A .faixa segue
+   dando o limite externo (o recuo é o mesmo de todas as telas, e é isso que
+   padroniza); este teto só impede que uma coluna única estique até a borda.
+   O cálculo soma o recuo dos dois lados para que o CONTEÚDO fique em 1.100px,
+   que é a largura com que o painel de controle foi desenhado. */
+.faixa-leitura {
+  max-width: calc(1100px + 2 * var(--faixa-recuo));
+}
+
+/* ============================================================================
+   GAVETA LATERAL — o dossiê que entra pela direita
+   ============================================================================
+   Antes cada tela fixava a própria largura em pixel (400, 540, 720, 900) com
+   `w-full max-w-[Npx]`. Isso tem dois defeitos:
+
+   · num monitor de 1920 o dossiê da gestora ocupava 28% da tela e obrigava a
+     rolar tabelas que caberiam inteiras;
+   · a largura era a mesma em 1366 e em 2560 — ou seja, não era responsiva,
+     era só limitada.
+
+   Aqui a largura acompanha o viewport entre um piso e um teto. Quatro degraus,
+   porque os quatro dossiês carregam volumes diferentes de conteúdo: o de
+   bucket é uma lista, o de fundos é uma tabela larga.
+
+                        antes    em 1366    em 1920
+     .gaveta-p          400px      464px      620px
+     .gaveta-m          540px      628px      840px
+     .gaveta-g          720px      792px     1080px
+     .gaveta-xg         900px      956px     1344px
+
+   O `translateX(100%)` que anima a entrada é relativo à largura do próprio
+   elemento, então continua funcionando em qualquer um dos degraus.
+   ========================================================================== */
+.gaveta {
+  /* O padrão existe para o caso de alguém usar `.gaveta` sem escolher degrau:
+     `width: var(--indefinida)` é inválido em tempo de cálculo e cairia em
+     `auto`, colapsando a gaveta na largura do conteúdo. Os degraus abaixo
+     vencem por virem depois, com a mesma especificidade. */
+  --gaveta-largura: clamp(360px, 46vw, 840px);
+  width: var(--gaveta-largura);
+  /* Nunca ultrapassa a tela, por menor que ela seja. */
+  max-width: 100%;
+}
+
+.gaveta-p  { --gaveta-largura: clamp(320px, 34vw,  620px); }
+.gaveta-m  { --gaveta-largura: clamp(360px, 46vw,  840px); }
+.gaveta-g  { --gaveta-largura: clamp(360px, 58vw, 1080px); }
+.gaveta-xg { --gaveta-largura: clamp(360px, 70vw, 1360px); }
+
+/* Abaixo disto a gaveta toma a tela inteira. Sobrar uma faixa de 200px do
+   conteúdo atrás não ajuda ninguém a comparar nada — só encolhe o que se veio
+   ler. Vem por último de propósito: mesma especificidade dos degraus acima,
+   então é a ordem no arquivo que faz esta regra vencer. */
+@media (max-width: 900px) {
+  .gaveta { width: 100%; }
+}

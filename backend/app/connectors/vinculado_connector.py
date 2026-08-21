@@ -49,6 +49,7 @@ import pandas as pd
 from app.config import settings
 from app.connectors.base import DataConnector
 from app.services import outlook_inbox
+from app.utils import limpar_gestora
 
 logger = logging.getLogger("vinculado_connector")
 
@@ -258,7 +259,7 @@ class VinculadoConnector(DataConnector):
         for i, linha in dados.iterrows():
             historico = {
                 janela.chave: float(linha[col])
-                for col, janela in zip(self._colunas_janela, self.janelas)
+                for col, janela in zip(self._colunas_janela, self.janelas, strict=True)
             }
             if not any(linha[c] for c in numericas):
                 sem_dados += 1
@@ -276,7 +277,10 @@ class VinculadoConnector(DataConnector):
                 # Só esta linha recebe o PL do CNPJ; ver bloco acima.
                 "primeira_do_cnpj": principal,
                 "nome": str(linha[cols["nome"]]).strip(),
-                "gestora": str(linha[cols["gestora"]]).strip(),
+                # Normalizado aqui, no ponto de entrada: o nome da gestora é a
+                # chave de agrupamento de todo o painel, e limpá-lo só na tela
+                # faria a mesma casa contar duas vezes.
+                "gestora": limpar_gestora(linha[cols["gestora"]]),
                 "diaria": float(linha[cols["diaria"]]),
                 "semanal": float(linha[cols["semanal"]]),
                 "mensal": float(linha[cols["mensal"]]),

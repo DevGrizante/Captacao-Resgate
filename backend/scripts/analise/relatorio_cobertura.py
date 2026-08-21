@@ -22,7 +22,7 @@ fundos já presentes na planilha têm. Assim o relatório se ajusta sozinho se o
 recorte do export mudar.
 
 Uso:
-    python scripts/relatorio_cobertura.py
+    python backend/scripts/analise/relatorio_cobertura.py
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.config import DATA_DIR, settings  # noqa: E402
 from app.connectors import cvm_cadastro  # noqa: E402

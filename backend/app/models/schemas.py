@@ -87,8 +87,17 @@ class Fundo(BaseModel):
     # --- universo ---
     # Quais sinais indicaram crédito privado (ver services/credito_privado.py).
     sinais_credito: list[str] = Field(default_factory=list)
-    # None = sem composição para classificar (aguardando Quantum).
+    # TODO fundo tem bucket desde 20/08/2026 — nenhum fica nulo. O que
+    # distingue um bucket medido de um inferido é `bucket_origem`, abaixo.
     bucket: Optional[Bucket] = None
+    # "carteira" = medido na composição do CDA. "inferido" = deduzido do nome
+    # e do perfil da cota, porque não havia carteira legível.
+    #
+    # O campo existe para que juntar todo mundo num bucket não apague a
+    # diferença entre "olhamos" e "não olhamos". Uma tela que precise só do
+    # universo medido filtra por "carteira" e recupera exatamente o que o
+    # painel mostrava antes.
+    bucket_origem: Optional[str] = None
     # Por que este bucket, em uma frase. É o que explica na tela um fundo com
     # nome de incentivada que caiu em Misto — sem isso a classificação parece
     # arbitrária justamente nos casos em que ela é mais informativa.
@@ -202,6 +211,46 @@ class GestoraResumo(BaseModel):
     perfil_pos_pct: Optional[float] = None
     perfil_inflacao_pct: Optional[float] = None
     perfil_indefinido: int = 0                       # fundos sem perfil
+
+
+class PressaoGestora(BaseModel):
+    """Uma gestora na tela de pressão: direção, perfil e agenda de vencimento.
+
+    Os dicionários `estoque_por_eixo` e `agenda` vêm com chave livre de
+    propósito: os eixos (lf/cdb/ipca/cdi/pre/outro) são definidos em
+    `services/pressao_gestora.EIXOS`, e declará-los campo a campo aqui obrigaria
+    a mexer em dois arquivos toda vez que um eixo entrasse ou saísse.
+    """
+    gestora: str
+    # comprador | vendedor | neutro — o SINAL da pressão.
+    direcao: str
+    direcao_rotulo: str
+    direcao_motivo: str
+    # bancario | debenture_ipca | debenture_cdi | misto | sem_carteira
+    perfil: str
+    perfil_rotulo: str
+    perfil_motivo: str
+    fluxo: float
+    carteira_datada: float
+    carteira_credito: Optional[float] = None
+    # Quanto do estoque de crédito tem vencimento conhecido. Abaixo de 100% há
+    # CRI/CRA no meio, que o CDA não data — e a agenda subestima.
+    agenda_cobertura_pct: Optional[float] = None
+    estoque_por_eixo: dict[str, float] = Field(default_factory=dict)
+    # {"m3": {eixo: R$}, "m6": …, "m12": …}
+    agenda: dict[str, dict[str, float]] = Field(default_factory=dict)
+    vence_3m: float = 0.0
+    vence_6m: float = 0.0
+    vence_12m: float = 0.0
+    # A frase que cruza fluxo e agenda — é o que a tela existe para dizer.
+    leitura: str
+    carteira_data: Optional[str] = None
+
+
+class PressaoResposta(BaseModel):
+    """A tela inteira: os totais do mercado no topo, as gestoras embaixo."""
+    totais: dict = Field(default_factory=dict)
+    gestoras: list[PressaoGestora] = []
 
 
 class BucketResumo(BaseModel):

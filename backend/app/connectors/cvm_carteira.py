@@ -157,9 +157,17 @@ def _linhas_credito(z: zipfile.ZipFile, mes: str, mapa_snd: dict) -> pd.DataFram
         if df is None or df.empty:
             continue
         df["cnpj"] = df["CNPJ_FUNDO_CLASSE"].map(so_digitos)
+        # Sem `strict=True` de propósito: `df.get(coluna, "")` devolve uma
+        # STRING VAZIA quando o bloco não tem a coluna, e aí os comprimentos
+        # divergem por desenho. O `zip` para na menor, todo eixo fica `None`, e
+        # os fundos afetados saem sem composição — que é a degradação correta.
+        # Com `strict=True` isso viraria exceção e derrubaria a carga inteira
+        # por causa de um bloco com esquema diferente.
         df["eixo"] = [
             _eixo_posfx(a, b)
-            for a, b in zip(df.get("DS_INDEXADOR_POSFX", ""), df.get("TITULO_POSFX", ""))
+            for a, b in zip(  # noqa: B905
+                df.get("DS_INDEXADOR_POSFX", ""), df.get("TITULO_POSFX", "")
+            )
         ]
         df["instrumento"] = df["TP_ATIVO"].map(_instrumento)
         partes.append(df[["cnpj", "instrumento", "eixo", "VL_MERC_POS_FINAL"]])

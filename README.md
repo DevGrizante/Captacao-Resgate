@@ -790,14 +790,14 @@ Para regenerar o mock a partir do último anexo:
 
 ```bat
 cd backend
-python scripts\gerar_mock.py
+python backend/scripts/analise/gerar_mock.py
 ```
 
 ## Relatório de cobertura
 
 ```bat
 cd backend
-python scripts\relatorio_cobertura.py
+python backend/scripts/analise/relatorio_cobertura.py
 ```
 
 Gera dois CSVs em `data/relatorios/`, para conferir o recorte do export:
@@ -945,17 +945,20 @@ aplicar a régua de %PL a todos faria os 21% sem PL sumirem da tela sem aviso �
 justamente aqueles sobre os quais menos se sabe. Cada linha da tabela mostra
 qual régua a qualificou (`-9,4% do PL` ou `3,4× típico`).
 
-## A tabela de gestoras tem quatro lentes
+## A tabela de gestoras
 
-Juntar tudo daria uma tabela de 16 colunas e nenhuma legível. O seletor
-**Visão** troca o conjunto de colunas conforme a pergunta:
+Uma lente só: **fluxo**. PL, mix da classificação e as quatro janelas
+(diária, semanal, mensal, semestral).
 
-| Visão | Colunas | Responde |
-|---|---|---|
-| **Fluxo** | PL, mix, diária/semanal/mensal/semestral | quem está captando e quem está sangrando |
-| **Mesa** | PL, share, taxa adm, cotização, prazo, **papel**, aplicação mínima | quanto custa, em quanto tempo sai, em que papel entra, com quanto entra |
-| **Performance** | PL, rentabilidade, volatilidade, pós/inflação, % crédito privado, prazo | quem entrega retorno, e correndo quanto risco |
-| **Distribuição** | cotistas, Δ cotistas, público-alvo, quem compra | onde essa gestora já está vendida |
+Havia um seletor **Visão** com mais três conjuntos de colunas — *Mesa* (taxa de
+administração, cotização, aplicação mínima), *Performance* (rentabilidade e
+volatilidade) e *Distribuição* (cotistas, público-alvo). Saíram em 21/08/2026,
+junto com o filtro "Só fundos abertos p/ captação".
+
+O motivo é de negócio, não de tela: os três descreviam o produto para o
+**investidor final**, e esta mesa é B2B — fala com tesouraria de um lado e asset
+do outro. Taxa de administração e rentabilidade não mudam com quem a mesa
+conversa; fluxo, sim.
 
 O dossiê lateral de cada gestora agrega o mesmo, e mais três barras que medem
 coisas diferentes e por isso têm paletas diferentes:
@@ -987,6 +990,11 @@ Cada fundo da lista mostra o bucket com a carteira que o gerou no *tooltip*
 | GET | `/api/papel-por-emissor` | A mesma carteira pela ponta do emissor: quem carrega o papel dele |
 | GET | `/api/papel-por-emissor/{raiz}` | Quem tem o papel deste emissor em carteira, por gestora, tipo e mes |
 | GET | `/api/fonte` | Arquivo em uso e campos indisponíveis |
+| GET | `/api/pressao` | Pressão de compra/venda por gestora: direção do fluxo, perfil da carteira e agenda de vencimento em 3/6/12 meses por eixo |
+| POST | `/api/inbox` | Recebe a planilha do dia pela rede (token próprio) |
+| GET | `/api/inbox/ultimo` | Nome, hora, tamanho e hash da planilha em uso |
+| GET | `/api/inbox/ultimo/arquivo` | Baixa a planilha que o painel está lendo |
+| POST | `/api/admin/coletar-email` | Busca o anexo na caixa agora (requer `EMAIL_MODO`) |
 | POST | `/api/admin/refresh` | Re-varre o Outlook e recalcula o pipeline (recarrega a fonte) |
 | GET | `/api/admin/parametros` | Parametros editaveis e o retrato atual da classificacao |
 | PUT | `/api/admin/parametros` | Grava os parametros **e reclassifica a base**, devolvendo as transicoes |

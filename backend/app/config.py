@@ -48,6 +48,51 @@ class Settings:
     # Quantos e-mails recentes varrer antes de desistir.
     OUTLOOK_MAX_ITENS: int = int(os.getenv("OUTLOOK_MAX_ITENS", "60"))
 
+    # =========================================================================
+    # --- Ingestão por e-mail na NUVEM (services/email_inbox.py) ---
+    # =========================================================================
+    # O bloco OUTLOOK_* acima lê o Outlook instalado, via COM — só Windows, e
+    # amarrado a uma máquina ligada. Este bloco é o substituto para servidor: o
+    # próprio painel busca o e-mail, sem intermediário.
+    #
+    #   off    desligado (padrão). Nada muda para quem já roda hoje.
+    #   graph  Microsoft Graph, autenticando como APLICAÇÃO. É o caminho para
+    #          caixa em Microsoft 365 — não guarda senha de pessoa e não quebra
+    #          quando alguém troca a própria senha.
+    #   imap   IMAP genérico (biblioteca padrão). Para provedor não-Microsoft
+    #          ou caixa de serviço com senha de aplicativo.
+    #
+    # O assunto e o remetente reaproveitam OUTLOOK_ASSUNTO / OUTLOOK_REMETENTE:
+    # é o MESMO critério do caminho antigo, e ter dois lugares para configurar
+    # a mesma coisa seria o começo de os dois discordarem.
+    EMAIL_MODO: str = os.getenv("EMAIL_MODO", "off").strip().lower()
+    # De quantos em quantos minutos o painel vai à caixa sozinho. 0 = nunca
+    # (só pelo POST /api/admin/coletar-email, ou por um cron externo).
+    # 15 min cobre o e-mail da manhã sem transformar a caixa em alvo de
+    # polling: são ~40 chamadas por dia útil, dentro de qualquer cota.
+    EMAIL_INTERVALO_MIN: int = int(os.getenv("EMAIL_INTERVALO_MIN", "0"))
+    # Janela de busca no IMAP, em dias. O IMAP filtra por data no servidor
+    # (buscar por assunto não funciona: ele chega codificado em RFC 2047).
+    EMAIL_DIAS: int = int(os.getenv("EMAIL_DIAS", "7"))
+
+    # --- Microsoft Graph (EMAIL_MODO=graph) ---
+    GRAPH_TENANT_ID: str = os.getenv("GRAPH_TENANT_ID", "")
+    GRAPH_CLIENT_ID: str = os.getenv("GRAPH_CLIENT_ID", "")
+    GRAPH_CLIENT_SECRET: str = os.getenv("GRAPH_CLIENT_SECRET", "")
+    # A caixa a ler (UPN ou objectId). Com permissão de aplicação o app enxerga
+    # TODAS as caixas do tenant por padrão — restrinja a esta com uma
+    # Application Access Policy no Exchange Online. Ver o README.
+    GRAPH_CAIXA: str = os.getenv("GRAPH_CAIXA", "")
+
+    # --- IMAP (EMAIL_MODO=imap) ---
+    IMAP_HOST: str = os.getenv("IMAP_HOST", "")
+    IMAP_PORT: int = int(os.getenv("IMAP_PORT", "993"))
+    IMAP_USUARIO: str = os.getenv("IMAP_USUARIO", "")
+    IMAP_SENHA: str = os.getenv("IMAP_SENHA", "")
+    # Preenchido, troca senha por XOAUTH2 (provedor que desligou básica).
+    IMAP_OAUTH_TOKEN: str = os.getenv("IMAP_OAUTH_TOKEN", "")
+    IMAP_PASTA: str = os.getenv("IMAP_PASTA", "INBOX")
+
     # --- CVM ---
     CVM_BASE_URL: str = os.getenv(
         "CVM_BASE_URL",
@@ -115,6 +160,20 @@ class Settings:
 
     # Registro de debêntures do SND: dá o indexador de 99,4% do valor do BLC_4.
     SND_TTL_HORAS: int = int(os.getenv("SND_TTL_HORAS", "168"))
+
+    # =========================================================================
+    # --- Pressão de compra/venda por gestora (services/pressao_gestora.py) ---
+    # =========================================================================
+    # A leitura central da mesa, que é B2B (tesouraria x asset):
+    #   captação líquida = a casa vai COMPRAR papel
+    #   resgate líquido  = vai VENDER
+    #   papel vencendo   = precisa ROLAR, capte ela ou não
+    #
+    # Corte para o fluxo virar direção, como FRAÇÃO da carteira de crédito da
+    # própria gestora — não em R$. R$ 50 mi numa casa de R$ 400 mi é movimento
+    # de mesa; na de R$ 40 bi é ruído de um dia. Um piso absoluto encheria a
+    # lista de gigantes que não fizeram nada.
+    PRESSAO_LIMIAR_PCT: float = float(os.getenv("PRESSAO_LIMIAR_PCT", "0.005"))
 
     # --- Perfil de indexador observado (services/perfil_indexador.py) ---
     # NÃO é o bucket: mede exposição do cotista, não composição da carteira.

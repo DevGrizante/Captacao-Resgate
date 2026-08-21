@@ -36,7 +36,7 @@ import requests
 
 from app.config import CACHE_DIR, settings
 from app.connectors import cvm_carteira, cvm_documentos
-from app.utils import so_digitos
+from app.utils import limpar_gestora, so_digitos
 
 logger = logging.getLogger("cvm_cadastro")
 
@@ -46,11 +46,15 @@ URL_INFORME = (
 )
 ATIVO = "Em Funcionamento Normal"
 
-_CACHE_FUNDOS = CACHE_DIR / "cvm_registro_fundos.parquet"
-_CACHE_CLASSES = CACHE_DIR / "cvm_registro_classes.parquet"
+# O sufixo _v2 invalida o cache gravado antes de 20/08/2026, quando as colunas
+# de CNPJ eram lidas como int64 e perdiam o zero à esquerda. Sem trocar o nome,
+# uma instalação já existente continuaria lendo o parquet corrompido por
+# CVM_CADASTRO_TTL_HORAS sem que ninguém percebesse.
+_CACHE_FUNDOS = CACHE_DIR / "cvm_registro_fundos_v2.parquet"
+_CACHE_CLASSES = CACHE_DIR / "cvm_registro_classes_v2.parquet"
 # O sufixo é a versão do schema: quando as colunas mudam, o arquivo antigo
 # simplesmente deixa de ser encontrado, em vez de ser lido com colunas a menos.
-_CACHE_INFORME = CACHE_DIR / "cvm_metricas_diarias_v3.parquet"
+_CACHE_INFORME = CACHE_DIR / "cvm_metricas_diarias_v4.parquet"
 
 
 def _cache_fresco() -> bool:
@@ -70,13 +74,26 @@ def _baixar() -> tuple[pd.DataFrame, pd.DataFrame]:
     resp = requests.get(URL_ZIP, timeout=settings.CVM_TIMEOUT_S)
     resp.raise_for_status()
     with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+        # `dtype=str` nas colunas de CNPJ NÃO é preferência de estilo.
+        #
+        # Neste arquivo o CNPJ vem sem pontuação, e o pandas o lê como int64:
+        # `07661541000100` vira o inteiro `7661541000100`. O zero à esquerda
+        # some, o valor continua parecendo um CNPJ, e o casamento com a
+        # planilha do Quantum — que traz o CNPJ pontuado, com o zero — falha em
+        # silêncio. Eram 358 dos 4.603 fundos do relatório de 20/08/2026 (7,8%)
+        # sem gestor, sem administrador, sem classificação e sem PL do registro.
+        #
+        # O `Patrimonio_Liquido` fica de fora da lista de propósito: ele PRECISA
+        # ser número, e já passa por `pd.to_numeric` logo adiante.
         fundos = pd.read_csv(
             z.open("registro_fundo.csv"), sep=";", encoding="latin-1", low_memory=False,
+            dtype={"CNPJ_Fundo": str},
             usecols=["ID_Registro_Fundo", "CNPJ_Fundo", "Denominacao_Social",
                      "Situacao", "Gestor", "Administrador"],
         )
         classes = pd.read_csv(
             z.open("registro_classe.csv"), sep=";", encoding="latin-1", low_memory=False,
+            dtype={"CNPJ_Classe": str},
             usecols=["ID_Registro_Fundo", "CNPJ_Classe", "Denominacao_Social",
                      "Situacao", "Patrimonio_Liquido", "Data_Patrimonio_Liquido",
                      "Forma_Condominio", "Classificacao", "Classificacao_Anbima"],
@@ -226,7 +243,7 @@ def metricas_diarias() -> pd.DataFrame:
         pl["pl_anterior"] = pd.NA
 
     # --- Cota: rentabilidade e volatilidade da série ---
-    cotas = inf[inf["cota"].notna() & (inf["cota"] > 0)]
+    cotas = inf[inf["cota"].notna() & (inf["cota"] > 0)].sort_values(["cnpj", "data"])
     g = cotas.groupby("cnpj")
     serie = pd.DataFrame({
         "cota_ini": g["cota"].first(),
@@ -241,8 +258,38 @@ def metricas_diarias() -> pd.DataFrame:
     curto = serie["rentab_dias"] < settings.CVM_RENTAB_DIAS_MIN
     serie.loc[curto, ["rentab_pct", "rentab_dias"]] = pd.NA
 
-    vol = g["cota"].apply(lambda s: s.pct_change().std() * (252 ** 0.5) * 100)
-    serie["vol_pct"] = vol.where(~curto)
+    # --- Retorno DIÁRIO, e a mediana dele ---
+    #
+    # >>> POR QUE A MEDIANA DO RETORNO DIÁRIO EXISTE AO LADO DO PONTA-A-PONTA
+    #
+    # `rentab_pct` divide a cota final pela inicial. Isso quebra quando o fundo
+    # muda a BASE da cota — grupamento/desdobramento, coisa que a migração da
+    # Resolução CVM 175 espalhou pelo mercado. Casos reais medidos no informe
+    # de 20/08/2026:
+    #
+    #     52278384000102   cota 1,30 -> 136,79    "rendeu" +10.414%
+    #     55582462000156   cota 1.101 -> 1,58     "rendeu"    -99,9%
+    #     32140660000164   cota 1.786 -> 0,00     "rendeu"   -100,0%
+    #
+    # Nenhum desses fundos ganhou ou perdeu isso. O que mudou foi a unidade.
+    #
+    # A mediana do retorno diário é imune: um salto de base é UM dia extremo
+    # numa série de ~130, e a mediana não o enxerga. O preço é medir o retorno
+    # TÍPICO em vez do acumulado — que é exatamente o que se quer para comparar
+    # um fundo com o CDI sem que uma troca de base envenene a conta.
+    #
+    # Nada consome esta coluna hoje — o módulo que a pedia foi removido em
+    # 21/08/2026. Ela fica porque o custo é uma passada vetorizada já feita para
+    # a volatilidade, e porque ela DOCUMENTA um defeito real do `rentab_pct`
+    # logo acima: quem for usar rentabilidade nesta base precisa saber disso.
+    #
+    # O `pct_change` vetorizado por grupo também substitui o `.apply` que
+    # calculava a volatilidade: uma passada em vez de duas, sobre 24 mil grupos.
+    cotas["ret"] = g["cota"].pct_change()
+    gr = cotas.groupby("cnpj")["ret"]
+    serie["ret_mediano_diario"] = gr.median().where(~curto)
+    serie["ret_pontos"] = gr.count()
+    serie["vol_pct"] = (gr.std() * (252 ** 0.5) * 100).where(~curto)
 
     # --- Cotistas: nível atual e variação no período ---
     cot = inf[inf["NR_COTST"].notna()]
@@ -252,7 +299,8 @@ def metricas_diarias() -> pd.DataFrame:
         (cotistas["cotistas"] / cotistas["_ini"] - 1) * 100
     ).where(cotistas["_ini"] > 0)
 
-    out = pl.join(serie[["rentab_pct", "rentab_dias", "vol_pct"]], how="outer")
+    out = pl.join(serie[["rentab_pct", "rentab_dias", "vol_pct",
+                         "ret_mediano_diario", "ret_pontos"]], how="outer")
     out = out.join(cotistas[["cotistas", "cotistas_var_pct"]], how="outer")
     out = out.astype({"pl": "float64"}, errors="ignore")
 
@@ -271,7 +319,8 @@ def metricas_diarias() -> pd.DataFrame:
 
 def _vazio_diario() -> pd.DataFrame:
     cols = ["pl", "pl_data", "pl_anterior", "rentab_pct", "rentab_dias",
-            "vol_pct", "cotistas", "cotistas_var_pct"]
+            "vol_pct", "ret_mediano_diario", "ret_pontos", "cotistas",
+            "cotistas_var_pct"]
     return pd.DataFrame(columns=cols).set_index(pd.Index([], name="cnpj"))
 
 
@@ -338,7 +387,7 @@ class CVMCadastroEnricher:
                 linha = cad.loc[cnpj]
                 self.stats["no_cadastro"] += 1
                 f["cvm_situacao"] = linha["situacao"]
-                f["gestor_cvm"] = _texto(linha["gestor"])
+                f["gestor_cvm"] = limpar_gestora(_texto(linha["gestor"])) or None
                 f["administrador"] = _texto(linha["administrador"])
                 f["classificacao_anbima"] = _texto(linha["classificacao_anbima"])
                 f["forma_condominio"] = _texto(linha["forma_condominio"])

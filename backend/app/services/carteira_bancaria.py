@@ -63,14 +63,13 @@ import pandas as pd
 from app.connectors import cvm_emissores
 from app.models.schemas import (
     CarregadorPapel,
-    EmissorPapelBancario,
     EmissorPapelBancarioDetalhe,
     EmissorPapelBancarioNaLista,
-    MesDoEmissor,
+    Fundo,
     FundoPapelBancario,
     FundoPapelBancarioDetalhe,
-    Fundo,
     GestoraNoEmissor,
+    MesDoEmissor,
     PosicaoBancaria,
     TesourariaNaCarteira,
     VencimentoMes,

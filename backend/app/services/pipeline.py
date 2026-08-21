@@ -24,7 +24,7 @@ from collections import defaultdict
 import pandas as pd
 
 from app.config import settings
-from app.connectors import cvm_emissores
+from app.connectors import cvm_emissores, cvm_vencimentos
 from app.connectors.base import DataConnector
 from app.connectors.cvm_cadastro import CVMCadastroEnricher
 from app.connectors.cvm_connector import CVMConnector
@@ -40,14 +40,16 @@ from app.models.schemas import (
     EmissorPapelBancarioNaLista,
     FonteInfo,
     Fundo,
+    FundoPapelBancario,
+    FundoPapelBancarioDetalhe,
     GestoraResumo,
     KpisFluxo,
     KpisMesa,
     MoverGestora,
+    PressaoGestora,
+    PressaoResposta,
     SerieTemporalPonto,
     StressFundo,
-    FundoPapelBancario,
-    FundoPapelBancarioDetalhe,
     TesourariaDossie,
     TesourariaResumo,
 )
@@ -55,9 +57,16 @@ from app.services import (
     carteira_bancaria,
     credito_privado,
     perfil_indexador,
+    pressao_gestora,
     tesourarias,
 )
-from app.services.classifier import classificar, nome_incentivado
+from app.services.classifier import (
+    ORIGEM_CARTEIRA,
+    ORIGEM_INFERIDO,
+    classificar,
+    classificar_sem_carteira,
+    nome_incentivado,
+)
 
 logger = logging.getLogger("pipeline")
 
@@ -99,6 +108,10 @@ class Pipeline:
         self._carteira_bancaria: carteira_bancaria.Contexto = (
             carteira_bancaria.Contexto()
         )
+        # Agenda de vencimento agregada por gestora. Montada uma vez por carga:
+        # são ~300 mil posições, e refazer o groupby a cada requisição custaria
+        # ~0,4 s por pessoa que abrisse a tela.
+        self._pressao: pressao_gestora.Contexto = pressao_gestora.Contexto()
         self._janelas: list[dict] = []
         self._fonte_info: FonteInfo = FonteInfo(fonte=settings.DATA_SOURCE)
         self._data_referencia: str | None = None
@@ -174,7 +187,9 @@ class Pipeline:
             # Mede exposição do cotista (benchmark / comportamento da cota),
             # não composição da carteira. Ver services/perfil_indexador.py.
             perfil, origem, detalhe = perfil_indexador.avaliar(c)
-            bucket, bucket_motivo = _bucket_de(c)
+            # O perfil da cota entra na classificação como ÚLTIMO recurso: ele
+            # só é consultado quando não há carteira nenhuma para medir.
+            bucket, bucket_motivo, bucket_origem = _bucket_de(c, perfil)
             fundos.append(Fundo(
                 perfil_indexador=perfil,
                 perfil_indexador_origem=origem,
@@ -189,6 +204,7 @@ class Pipeline:
                 pl_data=c.get("pl_data"),
                 bucket=bucket,
                 bucket_motivo=bucket_motivo,
+                bucket_origem=bucket_origem,
                 nome_incentivado=nome_incentivado(c.get("nome")),
                 diaria=_f(c.get("diaria")),
                 semanal=_f(c.get("semanal")),
@@ -255,6 +271,18 @@ class Pipeline:
             self._tesourarias = tesourarias.Contexto()
             self._carteira_bancaria = carteira_bancaria.Contexto()
 
+        # A agenda de vencimento é independente do mapa de emissores: ela lê o
+        # BLC_4 (debênture) além do BLC_5, e precisa sobreviver a uma falha lá.
+        # Por isso tem o próprio try — encadeá-la no bloco acima faria a tela
+        # de pressão sumir por causa de um problema em outra fonte.
+        try:
+            self._pressao = pressao_gestora.preparar(
+                fundos, cvm_vencimentos.carregar(),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Agenda de vencimento indisponível (%s).", e)
+            self._pressao = pressao_gestora.Contexto()
+
         self._caches.clear()
         self._cache_ts = time.time()
         logger.info(
@@ -297,11 +325,14 @@ class Pipeline:
 
         for f in self._fundos:
             anterior = f.bucket
-            novo, motivo = _classificar(
+            novo, motivo, origem = _classificar(
                 f.pct_lf, f.pct_ipca, f.pct_cdi, f.nome, f.dap_cobertura,
+                perfil_indexador=f.perfil_indexador,
+                carteira_motivo=f.carteira_motivo,
             )
             f.bucket = novo
             f.bucket_motivo = motivo
+            f.bucket_origem = origem
             if novo != anterior:
                 alterados += 1
                 transicoes[f"{_rotulo(anterior)} -> {_rotulo(novo)}"] += 1
@@ -558,6 +589,14 @@ class Pipeline:
             fs = self._fundos
             # `aberto_captacao is None` = não sabemos; filtrar por isso zeraria
             # o dashboard inteiro enquanto o Quantum não responde.
+            #
+            # >>> O PADRÃO VIROU False EM 21/08/2026
+            # O filtro "Só fundos abertos p/ captação" saiu da tela. O parâmetro
+            # continua existindo — no dia em que o Quantum responder,
+            # `aberto_captacao` volta a ter valor e alguém pode querer filtrar
+            # por ele —, mas o padrão não pode mais ser True: esconder fundos
+            # sem ninguém ter pedido é o tipo de recorte silencioso que o
+            # relatório inteiro existe para evitar.
             if abertos:
                 fs = [f for f in fs if f.aberto_captacao is not False]
             if indexador != "todos":
@@ -569,11 +608,11 @@ class Pipeline:
 
     # ---------- API consumida pelos routers ----------
     def dashboard(self, janela: str = "semanal", indexador: str = "todos",
-                  abertos: bool = True) -> DashboardResponse:
+                  abertos: bool = False) -> DashboardResponse:
         return self._get_data(janela, indexador, abertos)["dashboard"]
 
     def dossie(self, gestora: str, janela: str = "semanal", indexador: str = "todos",
-               abertos: bool = True) -> DossieResponse | None:
+               abertos: bool = False) -> DossieResponse | None:
         data = self._get_data(janela, indexador, abertos)
         g = data["gestoras_idx"].get(gestora)
         if not g:
@@ -624,7 +663,7 @@ class Pipeline:
         )
 
     def movers(self, direcao: str = "pos", limite: int = 6, janela: str = "semanal",
-               indexador: str = "todos", abertos: bool = True) -> list[MoverGestora]:
+               indexador: str = "todos", abertos: bool = False) -> list[MoverGestora]:
         data = self._get_data(janela, indexador, abertos)
         gs = list(data["gestoras_idx"].values())
         # Sem PL não há "variação de PL"; a ordenação cai para o próprio fluxo
@@ -649,7 +688,7 @@ class Pipeline:
         ]
 
     def stress(self, limite: int = 50, janela: str = "semanal",
-               indexador: str = "todos", abertos: bool = True) -> list[StressFundo]:
+               indexador: str = "todos", abertos: bool = False) -> list[StressFundo]:
         data = self._get_data(janela, indexador, abertos)
         achados = self._estressados(data["fundos"], janela)
         return [
@@ -677,6 +716,28 @@ class Pipeline:
     def tesouraria(self, raiz: str, limite: int = 40) -> TesourariaDossie | None:
         self._garantir()
         return tesourarias.dossie(self._tesourarias, raiz, limite)
+
+    def pressao(self, janela: str = "semanal", limite: int = 500,
+                direcao: str = "todas") -> PressaoResposta:
+        """Pressão de compra/venda por gestora, cruzada com a agenda.
+
+        O fluxo vem da MESMA janela que a tela principal usa, para as duas não
+        se contradizerem: uma gestora não pode aparecer compradora no dashboard
+        e vendedora aqui porque cada tela somou um período diferente.
+        """
+        self._garantir()
+        if self._pressao.vazio():
+            return PressaoResposta(totais={}, gestoras=[])
+
+        fluxos: dict[str, float] = defaultdict(float)
+        for f in self._fundos:
+            fluxos[f.gestora] += _fluxo(f, janela)
+
+        linhas = pressao_gestora.listar(self._pressao, dict(fluxos), limite, direcao)
+        return PressaoResposta(
+            totais=pressao_gestora.totais(self._pressao),
+            gestoras=[PressaoGestora(**linha) for linha in linhas],
+        )
 
     def carteira_bancaria(self, limite: int = 200,
                           busca: str = "") -> list[FundoPapelBancario]:
@@ -754,32 +815,55 @@ def _distribuicao(fundos: list[Fundo]) -> dict[str, int]:
 
 def _classificar(
     pct_lf, pct_ipca, pct_cdi, nome, dap_cobertura,
-) -> tuple[Bucket | None, str | None]:
-    """Classifica só quando há composição; sem ela, o fundo fica sem bucket.
+    perfil_indexador=None, carteira_motivo=None,
+) -> tuple[Bucket, str, str]:
+    """Devolve (bucket, motivo, origem). NUNCA devolve bucket nulo.
 
-    Cair em MISTO por falta de dado seria mentira: MISTO significa "olhamos a
-    carteira e nenhum indexador é majoritário", não "não olhamos".
+    Dois caminhos, e a `origem` diz qual deles produziu o rótulo:
+
+        ORIGEM_CARTEIRA  há composição do CDA -> a regra hierárquica completa
+        ORIGEM_INFERIDO  não há -> nome + perfil da cota (classifier.py)
+
+    >>> POR QUE DEIXOU DE DEVOLVER None (20/08/2026)
+
+    Antes, sem composição o fundo saía sem bucket, para não confundir "não
+    olhamos" com o MISTO que significa "olhamos e nada domina". A distinção
+    continua valendo — ela só migrou de "campo nulo" para `bucket_origem`.
+
+    O que forçou a mudança é o propósito da tela: ela reporta FLUXO por
+    gestora. Fundo sem bucket some de toda visão agrupada por bucket, e leva o
+    fluxo dele junto. Eram 1.759 fundos e R$ 5,6 bi de fluxo semanal (13,6% do
+    total) invisíveis num relatório de fluxo.
 
     Ponto único de entrada da classificação no pipeline: a construção inicial e
     a reclassificação disparada pelo painel passam pelos dois lados daqui, e
     precisam continuar concordando quando a regra mudar.
     """
     if pct_lf is None and pct_ipca is None and pct_cdi is None:
-        return None, None
-    return classificar(
+        bucket, motivo = classificar_sem_carteira(
+            nome=nome or "",
+            perfil_indexador=perfil_indexador,
+            carteira_motivo=carteira_motivo,
+        )
+        return bucket, motivo, ORIGEM_INFERIDO
+
+    bucket, motivo = classificar(
         pct_lf=float(pct_lf or 0.0),
         pct_ipca=float(pct_ipca or 0.0),
         pct_cdi=float(pct_cdi or 0.0),
         nome=nome or "",
         dap_cobertura=dap_cobertura,
     )
+    return bucket, motivo, ORIGEM_CARTEIRA
 
 
-def _bucket_de(cru: dict) -> tuple[Bucket | None, str | None]:
+def _bucket_de(cru: dict, perfil_indexador=None) -> tuple[Bucket, str, str]:
     """Versão para o dict cru vindo dos conectores."""
     return _classificar(
         cru.get("pct_lf"), cru.get("pct_ipca"), cru.get("pct_cdi"),
         cru.get("nome"), cru.get("dap_cobertura"),
+        perfil_indexador=perfil_indexador,
+        carteira_motivo=cru.get("carteira_motivo"),
     )
 
 

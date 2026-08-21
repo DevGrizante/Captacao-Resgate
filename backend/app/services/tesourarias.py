@@ -211,7 +211,7 @@ def _por_cnpj(fundos: list[Fundo]) -> dict[str, _Asset]:
     return por
 
 
-def _montar_ranking(ctx: "Contexto") -> list[TesourariaResumo]:
+def _montar_ranking(ctx: Contexto) -> list[TesourariaResumo]:
     """Ranking completo, sem corte. O `limite` da API e so uma fatia disto."""
     acc: dict[str, _Acumulado] = defaultdict(_Acumulado)
     nomes: dict[str, tuple[float, str]] = {}

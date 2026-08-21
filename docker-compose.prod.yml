@@ -1,0 +1,129 @@
+# =============================================================================
+#  Produção — puxa imagem PRONTA do registry. Não constrói nada.
+#
+#  A diferença para o docker-compose.yml é essa e é toda ela: lá o servidor
+#  compila; aqui ele baixa. Compilar em produção significa ter compilador,
+#  código-fonte e alguns minutos de CPU numa máquina que devia estar servindo
+#  o painel — e uma e2.micro do free tier não tem folga para isso.
+#
+#  USO NO SERVIDOR
+#
+#      export TAG=v1.3            # ou 'latest'
+#      docker compose -f docker-compose.prod.yml pull
+#      docker compose -f docker-compose.prod.yml up -d
+#
+#  ROLLBACK é a mesma coisa com a tag anterior:
+#
+#      TAG=v1.2 docker compose -f docker-compose.prod.yml up -d
+#
+#  O QUE PRECISA EXISTIR NO SERVIDOR
+#
+#      backend/.env      com PAINEL_SENHA, PAINEL_SEGREDO e o resto
+#      data/             volume dos dados (cache da CVM, inbox, parâmetros)
+#      .env              com REGISTRY, NAMESPACE e TAG (ou passe por ambiente)
+# =============================================================================
+
+name: captacao-resgate
+
+services:
+  api:
+    image: ${REGISTRY:-gru.ocir.io}/${NAMESPACE:?defina NAMESPACE}/captacao-resgate-api:${TAG:-latest}
+    container_name: captacao-api
+    restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    environment:
+      # O COM do Outlook não existe em Linux. Forçado aqui para que um .env
+      # copiado da máquina Windows não faça a API tentar (e falhar em silêncio,
+      # caindo para a planilha da véspera para sempre).
+      OUTLOOK_ENABLED: "false"
+
+      # Fuso do processo. Sem isto o container nasce em UTC e o nome do arquivo
+      # da inbox — que é derivado da hora — passa a contar três horas a mais
+      # que o e-mail.
+      TZ: America/Sao_Paulo
+
+      # Em produção o painel tem HTTPS, então o cookie de sessão precisa ser
+      # Secure. É a única variável que muda de valor entre a máquina do
+      # desenvolvedor e o servidor, e por isso está aqui e não no .env.example.
+      PAINEL_COOKIE_SEGURO: "true"
+
+    volumes:
+      # Dado FORA da imagem: são dezenas de MB de cache e os anexos do e-mail,
+      # que são dado de cliente. Como volume nomeado (e não bind mount), ele
+      # sobrevive a `down`, a troca de tag e à reinstalação do host.
+      - dados:/app/data
+
+    # A API escuta só na rede interna. Quem fala com a internet é o proxy
+    # (Caddy, no host) — publicar a 8000 aqui deixaria dar a volta no HTTPS e o
+    # cookie de sessão viajaria em texto claro.
+    expose:
+      - "8000"
+
+    # Uma e2.micro tem 1 GB. A primeira carga da CVM consome bem mais que o
+    # regime permanente, e sem teto ela leva o host junto (o OOM killer do
+    # Linux escolhe a vítima, e a vítima costuma ser o sshd). Com o teto, quem
+    # morre é o container, e o `restart` o traz de volta.
+    deploy:
+      resources:
+        limits:
+          memory: 900M
+
+    logging:
+      # Sem isto o json-file cresce sem limite e enche o disco da VM em algumas
+      # semanas — falha que só aparece quando já não dá para fazer login.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      # A primeira carga passa de nove minutos. Sem esta folga o container
+      # nasceria "unhealthy" e o compose ficaria reiniciando um processo que
+      # está apenas trabalhando.
+      start_period: 900s
+      retries: 3
+
+    networks:
+      - bgc-net
+
+  web:
+    image: ${REGISTRY:-gru.ocir.io}/${NAMESPACE:?defina NAMESPACE}/captacao-resgate-web:${TAG:-latest}
+    container_name: captacao-web
+    restart: unless-stopped
+
+    ports:
+      # Só no loopback: o Caddy do host termina o TLS e faz o proxy. Publicar
+      # em 0.0.0.0 abriria o painel em HTTP puro na porta 8080 do IP público,
+      # contornando o HTTPS sem que nada na tela indicasse isso.
+      - "127.0.0.1:8080:80"
+
+    depends_on:
+      # `service_started` e não `service_healthy`: o healthcheck da API só fica
+      # verde depois da primeira carga. O nginx pode subir antes; quem chegar
+      # cedo demais vê o erro da própria API, que é informativo, em vez de um
+      # container parado.
+      api:
+        condition: service_started
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - bgc-net
+
+volumes:
+  dados:
+    name: captacao-resgate-dados
+
+networks:
+  bgc-net:
+    name: bgc-net

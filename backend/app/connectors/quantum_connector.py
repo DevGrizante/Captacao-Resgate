@@ -73,8 +73,8 @@ class QuantumEnricher:
 
     # ---------- integração real (implemente aqui) ----------
     def _chamar_api(self, cnpj: str) -> Optional[dict]:
-        import time
         import logging
+        import time
         
         logger = logging.getLogger("quantum_connector")
         

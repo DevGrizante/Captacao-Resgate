@@ -1,0 +1,145 @@
+# ==============================================================================
+#  CI — o que precisa estar verde antes de um merge.
+#
+#  Três trabalhos, nesta ordem de custo:
+#
+#    qualidade  ruff (lint + formato). Segundos. Falha cedo e barato.
+#    testes     pytest. A suíte NÃO toca a rede (ver backend/tests/conftest.py),
+#               então ela não fica vermelha porque a CVM caiu.
+#    imagem     build das duas imagens Docker. Não publica nada — só prova que
+#               o Dockerfile ainda constrói. Um Dockerfile que só quebra na
+#               hora do deploy é o pior momento para descobrir.
+# ==============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Permite rodar à mão pela aba Actions, útil para conferir um cache de
+  # dependência ou um runner novo sem precisar de um commit vazio.
+  workflow_dispatch:
+
+# Um push novo na mesma branch cancela o CI do anterior: ninguém precisa do
+# resultado de um commit que já foi substituído, e isso libera runner.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  qualidade:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - run: pip install -r backend/requirements-dev.txt
+
+      - name: ruff check
+        run: ruff check backend/
+
+      - name: ruff format --check
+        run: ruff format --check backend/
+        # O formato não bloqueia o merge: o projeto tem um estilo próprio de
+        # comentário longo que o formatador ainda não conhece inteiro. O aviso
+        # fica visível sem transformar cada PR numa discussão de vírgula.
+        continue-on-error: true
+
+  testes:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Instalar dependências
+        # `requirements.txt` traz pandas/pyarrow, que os testes importam pela
+        # cadeia de `app.config`. O marcador de pywin32 é ignorado sozinho no
+        # Linux — não é preciso editar o arquivo.
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-dev.txt
+
+      - name: pytest
+        working-directory: backend
+        run: pytest tests/ -v --tb=short
+
+      - name: A API sobe?
+        # Importar `app.main` executa o registro de rotas, o middleware de
+        # sessão e a leitura de parâmetros. É o teste de fumaça mais barato que
+        # existe: pega erro de import e de configuração antes do deploy.
+        working-directory: backend
+        run: python -c "import app.main; print(f'{len(app.main.app.routes)} rotas registradas')"
+
+  imagem:
+    name: Build das imagens
+    runs-on: ubuntu-latest
+    needs: [qualidade, testes]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build da API
+        uses: docker/build-push-action@v6
+        with:
+          # O contexto é a RAIZ, não backend/: o Dockerfile precisa enxergar
+          # backend/ como subpasta para que o BASE_DIR calculado em config.py
+          # (parents[2]) continue apontando para /app.
+          context: .
+          file: backend/Dockerfile
+          push: false
+          load: true
+          tags: captacao-resgate-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build do painel
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          load: true
+          tags: captacao-resgate-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: A imagem da API responde?
+        # Sobe o container de verdade e bate no /health. Um build que passa mas
+        # cujo entrypoint não sobe é exatamente o que este passo pega.
+        run: |
+          docker run -d --name api-ci -p 8000:8000 \
+            -e OUTLOOK_ENABLED=false \
+            -e DATA_SOURCE=vinculado \
+            captacao-resgate-api:ci
+          for tentativa in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              echo "OK na tentativa $tentativa"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "A API não respondeu em 60s. Log do container:"
+          docker logs api-ci
+          exit 1
+
+      - name: Log do container (sempre)
+        if: always()
+        run: docker logs api-ci || true

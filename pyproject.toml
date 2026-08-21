@@ -1,0 +1,71 @@
+# =============================================================================
+#  Configuração de ferramentas. Não é um pacote instalável — o projeto roda a
+#  partir do diretório, e este arquivo existe só para que ruff e pytest tenham
+#  a MESMA configuração na máquina de quem escreve e no CI. Sem isso, "passa
+#  aqui e falha lá" vira rotina.
+# =============================================================================
+
+[tool.ruff]
+line-length = 90
+target-version = "py312"
+# Os caches das ferramentas vivem sob .cache/, e não espalhados na raiz. Eram
+# duas pastas (.ruff_cache e .pytest_cache) que apareciam ao lado do código sem
+# nada a ver com ele — e que voltavam sozinhas a cada execução.
+cache-dir = ".cache/ruff"
+# O ambiente virtual e o Chart.js empacotado não são nosso código.
+extend-exclude = [".venv", "backend/.venv", "frontend/js/vendor"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes — importe não usado, variável não definida
+    "I",    # isort — ordem dos imports
+    "UP",   # pyupgrade — sintaxe antiga que o 3.12 já supera
+    "B",    # bugbear — armadilhas reais (mutável como default, etc.)
+    "SIM",  # simplify
+]
+ignore = [
+    # O projeto documenta decisão em comentário longo, em português, e alguns
+    # passam de 90 colunas por causa de acento e de tabela alinhada. Quebrar
+    # essas linhas pioraria o que elas existem para fazer.
+    "E501",
+    # `except Exception` é deliberado em vários pontos: uma fonte de dados fora
+    # do ar não pode derrubar o painel. Onde aparece, vem com `# noqa: BLE001`
+    # e uma frase explicando o que se degrada.
+    "BLE001",
+    # `Optional[X]` em vez de `X | None`. São 174 ocorrências, todas em
+    # `models/schemas.py`. A regra está certa em geral, mas reescrever a
+    # anotação de 174 campos Pydantic de uma vez é muito risco (o `from
+    # __future__ import annotations` muda como o Pydantic resolve o tipo) para
+    # zero ganho de comportamento. Ligar quando houver motivo para tocar no
+    # arquivo de qualquer forma.
+    "UP045",
+    # `class Bucket(str, Enum)` em vez de `StrEnum`. Trocar mudaria a
+    # serialização dos valores que já viajam na API e estão gravados em
+    # `data/parametros.json`. Não é uma limpeza — é uma quebra de contrato.
+    "UP042",
+    # `try/except/pass` -> `contextlib.suppress`. As três ocorrências vêm
+    # acompanhadas de um `# noqa: BLE001` com a frase que explica O QUE se
+    # perde quando aquela exceção acontece. `suppress` esconde justamente essa
+    # frase dentro de um gerenciador de contexto, e aqui ela é o que importa.
+    "SIM105",
+    # Nome de variável de uma letra (`l`, `I`, `O`). São 17, quase todas em
+    # laço curto sobre linha de CSV, onde o nome curto é o legível.
+    "E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Nos testes, `assert` é o ponto, e import dentro de função é usado de
+# propósito para provar que um módulo carrega isolado.
+"backend/tests/*" = ["S101", "PLC0415"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+cache_dir = ".cache/pytest"
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # O openpyxl avisa sobre estilo padrão em toda planilha que a Quantum
+    # gera. É ruído conhecido e não indica problema nenhum.
+    "ignore:Workbook contains no default style:UserWarning",
+]

@@ -2,8 +2,8 @@
 Regenera data/mock_fundos.json a partir de um `vinculado_*.xlsx`.
 
 Uso:
-    python scripts/gerar_mock.py                      # usa o último da inbox
-    python scripts/gerar_mock.py caminho/vinculado.xlsx
+    python backend/scripts/analise/gerar_mock.py                      # usa o último da inbox
+    python backend/scripts/analise/gerar_mock.py caminho/vinculado.xlsx
 
 O mock existe só para desenvolver o front offline. Os FLUXOS são reais (vêm do
 arquivo, lidos pelo VinculadoConnector); PL, composição, duration, cotização e
@@ -19,7 +19,7 @@ import random
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.config import DATA_DIR  # noqa: E402
 from app.connectors.vinculado_connector import VinculadoConnector  # noqa: E402

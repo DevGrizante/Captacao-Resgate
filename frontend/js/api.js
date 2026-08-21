@@ -58,10 +58,10 @@ async function apiSend(metodo, path, corpo) {
 }
 
 const API = {
-  dashboard: (s) => apiGet(`/api/dashboard?janela=${s.janela}&indexador=${s.indexador}&abertos=${s.abertos}`),
-  dossie: (gestora, s) => apiGet(`/api/dossie/${encodeURIComponent(gestora)}?janela=${s.janela}&indexador=${s.indexador}&abertos=${s.abertos}`),
-  movers: (direcao, limite, s) => apiGet(`/api/movers?direcao=${direcao}&limite=${limite}&janela=${s.janela}&indexador=${s.indexador}&abertos=${s.abertos}`),
-  stress: (limite, s) => apiGet(`/api/stress?limite=${limite}&janela=${s.janela}&indexador=${s.indexador}&abertos=${s.abertos}`),
+  dashboard: (s) => apiGet(`/api/dashboard?janela=${s.janela}&indexador=${s.indexador}`),
+  dossie: (gestora, s) => apiGet(`/api/dossie/${encodeURIComponent(gestora)}?janela=${s.janela}&indexador=${s.indexador}`),
+  movers: (direcao, limite, s) => apiGet(`/api/movers?direcao=${direcao}&limite=${limite}&janela=${s.janela}&indexador=${s.indexador}`),
+  stress: (limite, s) => apiGet(`/api/stress?limite=${limite}&janela=${s.janela}&indexador=${s.indexador}`),
 
   // --- mesa Tesouraria x Asset ---
   tesourarias: (limite = 60) => apiGet(`/api/tesourarias?limite=${limite}`),
